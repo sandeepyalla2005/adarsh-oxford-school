@@ -333,6 +333,8 @@ def get_dashboard_stats(user=Depends(get_current_user)):
         if cached is not None:
             return cached
 
+        logger.info("Fetching fresh dashboard stats...")
+        
         def count_students(filters: dict[str, str] | None = None) -> int:
             query = supabase.table("students").select("id", count="exact", head=True).eq("is_active", True)
             if filters:
@@ -341,10 +343,9 @@ def get_dashboard_stats(user=Depends(get_current_user)):
             response = query.execute()
             return int(response.count or 0)
 
-        total_future = _count_executor.submit(count_students)
-        new_future = _count_executor.submit(count_students, {"student_type": "new"})
-        total_count = total_future.result()
-        new_count = new_future.result()
+        # Run sequentially for better stability and debugging
+        total_count = count_students()
+        new_count = count_students({"student_type": "new"})
 
         result = {
             "totalStudents": total_count,
@@ -356,6 +357,7 @@ def get_dashboard_stats(user=Depends(get_current_user)):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Dashboard stats error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/notices")
