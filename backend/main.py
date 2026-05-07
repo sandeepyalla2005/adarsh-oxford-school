@@ -232,7 +232,18 @@ def get_students(class_name: Optional[str] = None):
         if cached is not None:
             return cached
 
-        query = supabase.table("students").select("id, class_id, classes(name)").eq("is_active", True)
+        query = supabase.table("students").select(
+            """
+            id, admission_number, full_name, class_id, roll_number, gender,
+            father_name, father_phone, mother_name, mother_phone,
+            dob, aadhaar, address,
+            term1_fee, term2_fee, term3_fee,
+            has_books, books_fee, has_transport, transport_fee, old_dues,
+            parent_email, student_type, joining_date, profile_photo,
+            is_active, status, dropout_reason, dropout_date, created_at,
+            classes(name)
+            """
+        ).eq("is_active", True)
         if class_name and class_name != "all":
             # First find class_id
             class_cache_key = f"class-id:{class_name}"
