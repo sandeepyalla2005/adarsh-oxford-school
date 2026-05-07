@@ -1,0 +1,273 @@
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Adarsh Oxford Fee Management - Premium Institutional Design System */
+
+@layer base {
+  :root {
+    /* Oxford Blue - Deep, prestigious primary color */
+    --background: 210 20% 98%;
+    --foreground: 220 30% 15%;
+
+    /* Card surfaces with subtle warmth */
+    --card: 0 0% 100%;
+    --card-foreground: 220 30% 15%;
+
+    /* Popover styling */
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 30% 15%;
+
+    /* Primary: Oxford Blue */
+    --primary: 220 60% 25%;
+    --primary-foreground: 45 30% 96%;
+
+    /* Secondary: Warm Gold accent */
+    --secondary: 45 70% 50%;
+    --secondary-foreground: 220 30% 15%;
+
+    /* Muted tones */
+    --muted: 220 15% 94%;
+    --muted-foreground: 220 15% 45%;
+
+    /* Accent: Rich gold */
+    --accent: 38 90% 55%;
+    --accent-foreground: 220 30% 15%;
+
+    /* Destructive states */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Success states */
+    --success: 142 70% 40%;
+    --success-foreground: 0 0% 100%;
+
+    /* Warning states */
+    --warning: 38 92% 50%;
+    --warning-foreground: 220 30% 15%;
+
+    /* Info states */
+    --info: 200 85% 50%;
+    --info-foreground: 0 0% 100%;
+
+    /* Border and inputs */
+    --border: 220 15% 88%;
+    --input: 220 15% 88%;
+    --ring: 220 60% 25%;
+
+    --radius: 0.625rem;
+
+    /* Sidebar styling */
+    --sidebar-background: 220 60% 22%;
+    --sidebar-foreground: 45 30% 96%;
+    --sidebar-primary: 45 70% 50%;
+    --sidebar-primary-foreground: 220 30% 15%;
+    --sidebar-accent: 220 50% 30%;
+    --sidebar-accent-foreground: 45 30% 96%;
+    --sidebar-border: 220 50% 28%;
+    --sidebar-ring: 45 70% 50%;
+
+    /* Custom gradients */
+    --gradient-oxford: linear-gradient(135deg, hsl(220 60% 25%), hsl(220 50% 35%));
+    --gradient-gold: linear-gradient(135deg, hsl(38 90% 55%), hsl(45 70% 50%));
+    --gradient-card: linear-gradient(180deg, hsl(0 0% 100%), hsl(220 15% 98%));
+
+    /* Shadows */
+    --shadow-soft: 0 2px 8px -2px hsl(220 30% 15% / 0.08);
+    --shadow-card: 0 4px 16px -4px hsl(220 30% 15% / 0.12);
+    --shadow-elevated: 0 8px 32px -8px hsl(220 30% 15% / 0.16);
+  }
+
+  .dark {
+    --background: 220 30% 8%;
+    --foreground: 45 30% 96%;
+
+    --card: 220 30% 12%;
+    --card-foreground: 45 30% 96%;
+
+    --popover: 220 30% 12%;
+    --popover-foreground: 45 30% 96%;
+
+    --primary: 45 70% 50%;
+    --primary-foreground: 220 30% 10%;
+
+    --secondary: 220 50% 25%;
+    --secondary-foreground: 45 30% 96%;
+
+    --muted: 220 25% 18%;
+    --muted-foreground: 220 15% 60%;
+
+    --accent: 38 90% 55%;
+    --accent-foreground: 220 30% 10%;
+
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 60% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 80% 50%;
+    --warning-foreground: 220 30% 10%;
+
+    --info: 200 75% 55%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 220 25% 22%;
+    --input: 220 25% 22%;
+    --ring: 45 70% 50%;
+
+    --sidebar-background: 220 30% 10%;
+    --sidebar-foreground: 45 30% 96%;
+    --sidebar-primary: 45 70% 50%;
+    --sidebar-primary-foreground: 220 30% 10%;
+    --sidebar-accent: 220 40% 18%;
+    --sidebar-accent-foreground: 45 30% 96%;
+    --sidebar-border: 220 30% 18%;
+    --sidebar-ring: 45 70% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  input[type=number] {
+    -moz-appearance: textfield;
+  }
+
+  @media (max-width: 768px) {
+    .page-header {
+      @apply mb-6;
+    }
+
+    .page-title {
+      @apply text-2xl;
+    }
+
+    .page-description {
+      @apply text-xs leading-relaxed;
+    }
+
+    .card-elevated,
+    .stat-card {
+      @apply p-4;
+    }
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    overflow-x: hidden;
+    width: 100vw;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    /* IE and Edge */
+    scrollbar-width: none;
+    /* Firefox */
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+    /* Chrome, Safari and Opera */
+  }
+}
+
+@layer components {
+  .card-elevated {
+    @apply bg-card rounded-lg border shadow-card transition-shadow hover:shadow-elevated;
+  }
+
+  .stat-card {
+    @apply bg-card rounded-lg border p-6 shadow-soft transition-all hover:shadow-card;
+  }
+
+  .table-header {
+    @apply bg-muted/50 font-medium text-muted-foreground;
+  }
+
+  .sidebar-link {
+    @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sidebar-foreground/80 transition-all hover:bg-sidebar-accent hover:text-sidebar-foreground;
+  }
+
+  .sidebar-link-active {
+    @apply bg-sidebar-accent text-sidebar-foreground font-medium;
+  }
+
+  .input-label {
+    @apply text-sm font-medium text-foreground mb-1.5 block;
+  }
+
+  .btn-oxford {
+    @apply bg-primary text-primary-foreground hover:bg-primary/90 font-medium shadow-soft transition-all hover:shadow-card;
+  }
+
+  .btn-gold {
+    @apply bg-secondary text-secondary-foreground hover:bg-secondary/90 font-medium shadow-soft transition-all;
+  }
+
+  .badge-success {
+    @apply bg-success/10 text-success border-success/20;
+  }
+
+  .badge-warning {
+    @apply bg-warning/10 text-warning border-warning/20;
+  }
+
+  .badge-destructive {
+    @apply bg-destructive/10 text-destructive border-destructive/20;
+  }
+
+  .badge-info {
+    @apply bg-info/10 text-info border-info/20;
+  }
+
+  .page-header {
+    @apply mb-8;
+  }
+
+  .page-title {
+    @apply text-3xl font-display font-semibold text-foreground;
+  }
+
+  .page-description {
+    @apply text-muted-foreground mt-1;
+  }
+
+  .animate-in {
+    @apply animate-fade-in;
+  }
+
+  .class-filter-rail {
+    @apply flex items-center gap-2 overflow-x-auto py-2 px-1;
+  }
+
+  .class-filter-item {
+    @apply relative flex items-center gap-2 px-4 py-2 text-sm font-medium text-muted-foreground transition-all rounded-full;
+    @apply hover:bg-muted/50 hover:text-foreground;
+  }
+
+  .class-filter-active {
+    @apply text-foreground font-semibold;
+  }
+
+  .class-filter-count {
+    @apply inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full text-[10px] font-bold;
+    @apply bg-muted text-muted-foreground ml-1;
+  }
+
+  .class-filter-count-active {
+    @apply bg-primary text-primary-foreground;
+  }
+
+  .slider-control {
+    @apply h-8 w-8 rounded-full border border-border/70 bg-background text-foreground shadow-sm transition-all;
+    @apply hover:bg-muted/60 disabled:opacity-30 disabled:shadow-none;
+  }
+}

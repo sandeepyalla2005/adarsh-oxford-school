@@ -1,0 +1,476 @@
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import {
+  History,
+  Search,
+  Download,
+  Printer,
+  IndianRupee,
+  FileText
+} from 'lucide-react';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from '@/components/ui/table';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { StatCard } from '@/components/dashboard/StatCard';
+import { supabase } from '@/integrations/supabase/client';
+import { format } from 'date-fns';
+
+interface Payment {
+  id: string;
+  receipt_number: string;
+  amount_paid: number;
+  payment_method: string;
+  payment_date: string;
+  fee_type: 'course' | 'books' | 'transport' | 'accessory' | 'accessories';
+  student_name: string;
+  term?: number;
+  month?: number;
+  item_name?: string;
+}
+
+const MONTHS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+];
+
+export default function FeeHistory() {
+  const navigate = useNavigate();
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterPeriod, setFilterPeriod] = useState('monthly');
+  const [selectedDay, setSelectedDay] = useState('');
+  const [selectedWeek, setSelectedWeek] = useState('1');
+  const [selectedMonth, setSelectedMonth] = useState((new Date().getMonth() + 1).toString());
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
+
+  useEffect(() => {
+    fetchPayments();
+  }, []);
+
+  const fetchPayments = async () => {
+    try {
+      // Fetch course payments
+      const { data: coursePayments } = await supabase
+        .from('course_payments')
+        .select('id, receipt_number, amount_paid, payment_method, payment_date, term, student_id, students(full_name)')
+        .order('payment_date', { ascending: false });
+
+      // Fetch books payments
+      const { data: booksPayments } = await supabase
+        .from('books_payments')
+        .select('id, receipt_number, amount_paid, payment_method, payment_date, student_id, students(full_name)')
+        .order('payment_date', { ascending: false });
+
+      // Fetch transport payments
+      const { data: transportPayments } = await supabase
+        .from('transport_payments')
+        .select('id, receipt_number, amount_paid, payment_method, payment_date, month, student_id, students(full_name)')
+        .order('payment_date', { ascending: false });
+
+      // Fetch accessory sales (Item-based issues)
+      const { data: accessorySales } = await supabase
+        .from('accessory_sales')
+        .select('id, receipt_number, total_amount, payment_method, created_at, student_id, students(full_name), accessories(item_name)')
+        .order('created_at', { ascending: false });
+
+      // Fetch accessories fees (Category-based student payments)
+      const { data: studentAccessoryPayments } = await supabase
+        .from('student_accessory_payments')
+        .select('id, receipt_number, amount_paid, payment_method, payment_date, student_id, students(full_name), accessory_categories(name)')
+        .order('payment_date', { ascending: false });
+
+      const allPayments: Payment[] = [
+        ...(coursePayments || []).map(p => ({
+          id: p.id,
+          receipt_number: p.receipt_number,
+          amount_paid: Number(p.amount_paid),
+          payment_method: p.payment_method,
+          payment_date: p.payment_date,
+          fee_type: 'course' as const,
+          student_name: (p.students as any)?.full_name || 'Unknown',
+          term: p.term,
+        })),
+        ...(booksPayments || []).map(p => ({
+          id: p.id,
+          receipt_number: p.receipt_number,
+          amount_paid: Number(p.amount_paid),
+          payment_method: p.payment_method,
+          payment_date: p.payment_date,
+          fee_type: 'books' as const,
+          student_name: (p.students as any)?.full_name || 'Unknown',
+        })),
+        ...(transportPayments || []).map(p => ({
+          id: p.id,
+          receipt_number: p.receipt_number,
+          amount_paid: Number(p.amount_paid),
+          payment_method: p.payment_method,
+          payment_date: p.payment_date,
+          fee_type: 'transport' as const,
+          student_name: (p.students as any)?.full_name || 'Unknown',
+          month: p.month,
+        })),
+        ...(accessorySales || []).map(p => ({
+          id: p.id,
+          receipt_number: p.receipt_number,
+          amount_paid: Number(p.total_amount),
+          payment_method: p.payment_method,
+          payment_date: p.created_at,
+          fee_type: 'accessory' as const,
+          student_name: (p.students as any)?.full_name || 'Unknown',
+          item_name: (p as any).accessories?.item_name || 'Unknown Item',
+        })),
+        ...(studentAccessoryPayments || []).map(p => ({
+          id: p.id,
+          receipt_number: p.receipt_number,
+          amount_paid: Number(p.amount_paid),
+          payment_method: p.payment_method,
+          payment_date: p.payment_date,
+          fee_type: 'accessories' as const,
+          student_name: (p.students as any)?.full_name || 'Unknown',
+          item_name: (p as any).accessory_categories?.name || 'Accessory Fee',
+        })),
+      ].sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime());
+
+      setPayments(allPayments);
+    } catch (error) {
+      console.error('Error fetching payments:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0,
+    }).format(value);
+  };
+
+  const getPaymentMethodBadge = (method: string) => {
+    const variants: Record<string, string> = {
+      cash: 'bg-success/10 text-success',
+      qr_code: 'bg-info/10 text-info',
+      bank_transfer: 'bg-primary/10 text-primary',
+      card: 'bg-secondary/10 text-secondary-foreground',
+    };
+    const labels: Record<string, string> = {
+      cash: 'Cash',
+      qr_code: 'QR Code',
+      bank_transfer: 'Bank',
+      card: 'Card',
+    };
+    return (
+      <Badge variant="outline" className={variants[method] || ''}>
+        {labels[method] || method}
+      </Badge>
+    );
+  };
+
+  const getFeeTypeBadge = (type: string) => {
+    const variants: Record<string, string> = {
+      course: 'bg-primary/10 text-primary',
+      books: 'bg-secondary/10 text-secondary-foreground',
+      transport: 'bg-success/10 text-success',
+      accessories: 'bg-info/10 text-info',
+      accessory: 'bg-warning/10 text-warning-foreground',
+    };
+    return (
+      <Badge variant="outline" className={variants[type] || ''}>
+        {type.charAt(0).toUpperCase() + type.slice(1)}
+      </Badge>
+    );
+  };
+
+  const filteredPayments = payments.filter((payment) => {
+    const matchesSearch =
+      payment.student_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      payment.receipt_number.toLowerCase().includes(searchQuery.toLowerCase());
+
+    // Date filtering based on selected period
+    const paymentDate = new Date(payment.payment_date);
+    let matchesPeriod = true;
+
+    if (filterPeriod === 'daily' && selectedDay) {
+      // Daily filtering logic
+      matchesPeriod = paymentDate.getDay() === ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].indexOf(selectedDay);
+    } else if (filterPeriod === 'weekly' && selectedWeek) {
+      // Weekly filtering logic
+      const weekOfMonth = Math.ceil(paymentDate.getDate() / 7);
+      matchesPeriod = weekOfMonth.toString() === selectedWeek;
+    } else if (filterPeriod === 'monthly' && selectedMonth) {
+      matchesPeriod = (paymentDate.getMonth() + 1).toString() === selectedMonth;
+    } else if (filterPeriod === 'yearly' && selectedYear) {
+      matchesPeriod = paymentDate.getFullYear().toString() === selectedYear;
+    }
+
+    return matchesSearch && matchesPeriod;
+  });
+
+  const totalIncome = filteredPayments.reduce((sum, p) => sum + p.amount_paid, 0);
+  const courseIncome = filteredPayments
+    .filter(p => p.fee_type === 'course')
+    .reduce((sum, p) => sum + p.amount_paid, 0);
+  const booksIncome = filteredPayments
+    .filter(p => p.fee_type === 'books')
+    .reduce((sum, p) => sum + p.amount_paid, 0);
+  const transportIncome = filteredPayments
+    .filter(p => p.fee_type === 'transport')
+    .reduce((sum, p) => sum + p.amount_paid, 0);
+  const accessoriesIncome = filteredPayments
+    .filter(p => p.fee_type === 'accessories')
+    .reduce((sum, p) => sum + p.amount_paid, 0);
+
+  return (
+    <DashboardLayout>
+      <div className="space-y-8">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="page-header mb-0">
+            <h1 className="page-title">Fee History</h1>
+            <p className="page-description">View and export payment records</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline">
+              <Download className="mr-2 h-4 w-4" />
+              Export
+            </Button>
+            <Button variant="outline">
+              <Printer className="mr-2 h-4 w-4" />
+              Print
+            </Button>
+          </div>
+        </motion.div>
+
+        {/* Summary Cards */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+        >
+          <StatCard
+            title="Total Income"
+            value={formatCurrency(totalIncome)}
+            icon={<IndianRupee className="h-6 w-6" />}
+            variant="primary"
+          />
+          <StatCard
+            title="Course Fees"
+            value={formatCurrency(courseIncome)}
+            icon={<IndianRupee className="h-6 w-6" />}
+          />
+          <StatCard
+            title="Books Fees"
+            value={formatCurrency(booksIncome)}
+            icon={<IndianRupee className="h-6 w-6" />}
+          />
+          <StatCard
+            title="Transport Fees"
+            value={formatCurrency(transportIncome)}
+            icon={<IndianRupee className="h-6 w-6" />}
+          />
+          <StatCard
+            title="Accessories Fees"
+            value={formatCurrency(accessoriesIncome)}
+            icon={<IndianRupee className="h-6 w-6" />}
+          />
+        </motion.div>
+
+        {/* Filters */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+        >
+          <Tabs value={filterPeriod} onValueChange={setFilterPeriod} className="w-full">
+            <TabsList>
+              <TabsTrigger value="daily">Daily</TabsTrigger>
+              <TabsTrigger value="weekly">Weekly</TabsTrigger>
+              <TabsTrigger value="monthly">Monthly</TabsTrigger>
+              <TabsTrigger value="yearly">Yearly</TabsTrigger>
+            </TabsList>
+
+            <div className="mt-4 flex flex-col gap-4 sm:flex-row">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search by student or receipt..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+
+              <TabsContent value="daily" className="mt-0">
+                <Select value={selectedDay} onValueChange={setSelectedDay}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue placeholder="Select day" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="mon">Monday</SelectItem>
+                    <SelectItem value="tue">Tuesday</SelectItem>
+                    <SelectItem value="wed">Wednesday</SelectItem>
+                    <SelectItem value="thu">Thursday</SelectItem>
+                    <SelectItem value="fri">Friday</SelectItem>
+                    <SelectItem value="sat">Saturday</SelectItem>
+                    <SelectItem value="sun">Sunday</SelectItem>
+                  </SelectContent>
+                </Select>
+              </TabsContent>
+
+              <TabsContent value="weekly" className="mt-0">
+                <Select value={selectedWeek} onValueChange={setSelectedWeek}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue placeholder="Select week" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">Week 1</SelectItem>
+                    <SelectItem value="2">Week 2</SelectItem>
+                    <SelectItem value="3">Week 3</SelectItem>
+                    <SelectItem value="4">Week 4</SelectItem>
+                  </SelectContent>
+                </Select>
+              </TabsContent>
+
+              <TabsContent value="monthly" className="mt-0">
+                <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue placeholder="Select month" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MONTHS.map((month, index) => (
+                      <SelectItem key={index} value={(index + 1).toString()}>
+                        {month}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </TabsContent>
+
+              <TabsContent value="yearly" className="mt-0">
+                <Select value={selectedYear} onValueChange={setSelectedYear}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue placeholder="Select year" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map((year) => (
+                      <SelectItem key={year} value={year.toString()}>
+                        {year}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </TabsContent>
+            </div>
+          </Tabs>
+        </motion.div>
+
+        {/* Transactions Table */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+        >
+          <Card className="card-elevated">
+            <CardHeader>
+              <CardTitle className="font-display flex items-center gap-2">
+                <History className="h-5 w-5 text-primary" />
+                Payment Transactions
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="table-header">
+                      <TableHead>Receipt No.</TableHead>
+                      <TableHead>Student</TableHead>
+                      <TableHead>Fee Type</TableHead>
+                      <TableHead>Details</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                      <TableHead>Method</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead className="text-center">Receipt</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {isLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={8} className="text-center py-12">
+                          <div className="h-8 w-8 mx-auto animate-spin rounded-full border-4 border-primary border-t-transparent" />
+                        </TableCell>
+                      </TableRow>
+                    ) : filteredPayments.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={8} className="text-center py-12 text-muted-foreground">
+                          No transactions found
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredPayments.slice(0, 50).map((payment) => (
+                        <TableRow key={payment.id} className="hover:bg-muted/50">
+                          <TableCell className="font-mono text-sm">
+                            {payment.receipt_number}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {payment.student_name}
+                          </TableCell>
+                          <TableCell>{getFeeTypeBadge(payment.fee_type)}</TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {payment.term ? `Term ${payment.term}` :
+                              payment.month ? MONTHS[payment.month - 1] :
+                                payment.item_name ? payment.item_name : '-'}
+                          </TableCell>
+                          <TableCell className="text-right font-semibold">
+                            {formatCurrency(payment.amount_paid)}
+                          </TableCell>
+                          <TableCell>{getPaymentMethodBadge(payment.payment_method)}</TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {format(new Date(payment.payment_date), 'dd MMM yyyy, hh:mm a')}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => navigate(`/receipt?receiptNo=${payment.receipt_number}&type=${payment.fee_type}`)}
+                            >
+                              <FileText className="h-4 w-4 text-primary" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      </div>
+    </DashboardLayout>
+  );
+}
