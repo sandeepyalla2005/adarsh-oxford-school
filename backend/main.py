@@ -26,11 +26,15 @@ logger = logging.getLogger("adarsh-oxford-api")
 load_dotenv()
 
 app = FastAPI(title="Adarsh Oxford School Management API")
-READ_CACHE_TTL_SECONDS = 15
-STATS_CACHE_TTL_SECONDS = 8
-CLASSES_CACHE_TTL_SECONDS = 300
+READ_CACHE_TTL_SECONDS = 300 # 5 minutes
+STATS_CACHE_TTL_SECONDS = 60 # 1 minute
+CLASSES_CACHE_TTL_SECONDS = 3600 # 1 hour
 _cache: dict[str, tuple[float, Any]] = {}
-_count_executor = ThreadPoolExecutor(max_workers=2)
+
+def clear_all_caches():
+    global _cache
+    _cache = {}
+    logger.info("All server-side caches cleared.")
 
 
 def cache_get(key: str, ttl_seconds: int) -> Any | None:
@@ -222,6 +226,29 @@ def get_classes():
     except HTTPException:
         raise
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/students/counts")
+def get_student_counts():
+    try:
+        cached = cache_get("students:counts", READ_CACHE_TTL_SECONDS)
+        if cached is not None:
+            return cached
+
+        # Use an RPC or aggregate query to get counts per class
+        # For simplicity and cross-DB compatibility, we'll fetch just class_id and name
+        # But even better: fetch all active students but only the class_id field
+        response = supabase.table("students").select("class_id, classes(name)").eq("is_active", True).execute()
+        
+        counts: dict[str, int] = {"all": len(response.data)}
+        for s in response.data:
+            cls_name = s.get("classes", {}).get("name")
+            if cls_name:
+                counts[cls_name] = counts.get(cls_name, 0) + 1
+        
+        return cache_set("students:counts", counts, READ_CACHE_TTL_SECONDS)
+    except Exception as e:
+        logger.error(f"Error fetching student counts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/students")

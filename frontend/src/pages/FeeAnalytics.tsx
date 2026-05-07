@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
   GraduationCap,
@@ -78,30 +79,9 @@ export default function FeeAnalytics() {
 
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [selectedMonth, setSelectedMonth] = useState<number | 'all'>('all');
-  const [monthData, setMonthData] = useState<MonthData[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [chartView, setChartView] = useState<'bar' | 'pie'>('bar');
-  const printRef = useRef<HTMLDivElement>(null);
-  const isFetchingRef = useRef(true);
-
-  // ── Fetch ──────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    fetchData();
-  }, [selectedYear]);
-
-  const fetchData = async () => {
-    isFetchingRef.current = true;
-    setIsLoading(true);
-    setError(null);
-
-    const timeout = setTimeout(() => {
-      if (isFetchingRef.current) {
-        setError('Connection is taking longer than expected. Please check your internet or Supabase project status.');
-      }
-    }, 8000);
-
-    try {
+  const { data: monthData = [], isLoading, error: queryError, refetch } = useQuery({
+    queryKey: ['fee-analytics', selectedYear],
+    queryFn: async () => {
       const startDate = `${selectedYear}-01-01`;
       const endDate   = `${selectedYear}-12-31`;
 
@@ -116,7 +96,7 @@ export default function FeeAnalytics() {
       const anyError = courseRes.error || booksRes.error || transportRes.error || accessoryRes.error || accessoriesPaymentsRes.error;
       if (anyError) throw anyError;
 
-      const built: MonthData[] = Array.from({ length: 12 }, (_, i) => {
+      return Array.from({ length: 12 }, (_, i) => {
         const m = i + 1;
         const inMonth = (d: string) => new Date(d).getMonth() + 1 === m;
 
@@ -129,18 +109,15 @@ export default function FeeAnalytics() {
 
         return { month: m, course, books, transport, accessory, total: course + books + transport + accessory };
       });
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
 
-      setMonthData(built);
-      setError(null);
-    } catch (err: any) {
-      console.error('FeeAnalytics fetch error:', err);
-      setError(err.message || 'Failed to connect to the database. Please check your Supabase configuration.');
-    } finally {
-      isFetchingRef.current = false;
-      clearTimeout(timeout);
-      setIsLoading(false);
-    }
-  };
+  const error = queryError ? (queryError as any).message : null;
+  const [chartView, setChartView] = useState<'bar' | 'pie'>('bar');
+  const printRef = useRef<HTMLDivElement>(null);
+
+  // ── Fetch ──────────────────────────────────────────────────────────────────
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const displayData = selectedMonth === 'all'
@@ -226,7 +203,7 @@ export default function FeeAnalytics() {
                 </SelectContent>
               </Select>
 
-              <Button variant="outline" size="sm" onClick={fetchData} className="rounded-xl border-slate-200 gap-1.5">
+              <Button variant="outline" size="sm" onClick={() => refetch()} className="rounded-xl border-slate-200 gap-1.5">
                 <RefreshCw className="h-4 w-4" /> Refresh
               </Button>
               <Button variant="outline" size="sm" onClick={handlePrint} className="rounded-xl border-slate-200 gap-1.5">
@@ -242,7 +219,7 @@ export default function FeeAnalytics() {
             <XCircle className="h-10 w-10 text-red-500 mx-auto mb-3" />
             <h3 className="text-lg font-bold text-red-900 mb-1">Connection Error</h3>
             <p className="text-red-700 max-w-md mx-auto mb-4">{error}</p>
-            <Button variant="outline" onClick={fetchData} className="rounded-xl border-red-200 bg-white hover:bg-red-50 text-red-700 gap-2">
+            <Button variant="outline" onClick={() => refetch()} className="rounded-xl border-red-200 bg-white hover:bg-red-50 text-red-700 gap-2">
               <RefreshCw className="h-4 w-4" /> Try Reconnecting
             </Button>
           </motion.div>

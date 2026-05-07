@@ -101,8 +101,11 @@ export default function TransportFees() {
 
   useEffect(() => {
     fetchClasses();
-    fetchStudentsWithTransportFees();
   }, []);
+
+  useEffect(() => {
+    fetchStudentsWithTransportFees();
+  }, [selectedClass]); // Refetch when class changes
 
   const fetchClasses = async () => {
     const { data } = await supabase
@@ -113,12 +116,23 @@ export default function TransportFees() {
   };
 
   const fetchStudentsWithTransportFees = async () => {
+    setIsLoading(true);
     try {
-      const { data: studentsData } = await supabase
+      let selectClause = 'id, full_name, class_id, father_phone, mother_phone, has_transport, transport_fee, classes(name)';
+      if (selectedClass !== 'all') {
+        selectClause = 'id, full_name, class_id, father_phone, mother_phone, has_transport, transport_fee, classes!inner(name)';
+      }
+
+      let query = supabase
         .from('students')
-        .select('id, full_name, class_id, father_phone, mother_phone, has_transport, transport_fee, classes(name)')
-        .eq('is_active', true)
-        .order('full_name');
+        .select(selectClause)
+        .eq('is_active', true);
+
+      if (selectedClass !== 'all') {
+        query = query.eq('classes.name', selectedClass);
+      }
+      
+      const { data: studentsData } = await query.order('full_name');
 
       const { data: payments } = await supabase
         .from('transport_payments')

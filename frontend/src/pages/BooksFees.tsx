@@ -93,8 +93,11 @@ export default function BooksFees() {
 
   useEffect(() => {
     fetchClasses();
-    fetchStudentsWithBooksFees();
   }, []);
+
+  useEffect(() => {
+    fetchStudentsWithBooksFees();
+  }, [selectedClass]); // Refetch when class changes
 
   const fetchClasses = async () => {
     const { data } = await supabase
@@ -105,12 +108,23 @@ export default function BooksFees() {
   };
 
   const fetchStudentsWithBooksFees = async () => {
+    setIsLoading(true);
     try {
-      const { data: studentsData } = await supabase
+      let selectClause = 'id, full_name, class_id, father_phone, mother_phone, has_books, books_fee, classes(name)';
+      if (selectedClass !== 'all') {
+        selectClause = 'id, full_name, class_id, father_phone, mother_phone, has_books, books_fee, classes!inner(name)';
+      }
+
+      let query = supabase
         .from('students')
-        .select('id, full_name, class_id, father_phone, mother_phone, has_books, books_fee, classes(name)')
-        .eq('is_active', true)
-        .order('full_name');
+        .select(selectClause)
+        .eq('is_active', true);
+
+      if (selectedClass !== 'all') {
+        query = query.eq('classes.name', selectedClass);
+      }
+      
+      const { data: studentsData } = await query.order('full_name');
 
       const { data: payments } = await supabase
         .from('books_payments')

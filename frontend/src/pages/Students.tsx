@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -50,9 +51,16 @@ export default function Students() {
   const location = useLocation();
   const portal = getCurrentPortal(location.pathname);
 
-  // State variables
-  const [students, setStudents] = useState<Student[]>([]);
-  const [classCounts, setClassCounts] = useState<Record<string, number>>({});
+  const queryClient = useQueryClient();
+  const { data: classCounts = {}, isLoading } = useQuery({
+    queryKey: ['student-counts'],
+    queryFn: async () => {
+      const resp = await apiFetch('/api/students/counts');
+      if (!resp.ok) throw new Error('Backend error');
+      return resp.json();
+    }
+  });
+
   const [isUploading, setIsUploading] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
@@ -63,46 +71,6 @@ export default function Students() {
     'Class 5', 'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10'
   ];
 
-  useEffect(() => {
-    fetchStudents();
-  }, []);
-
-  const currentYear = new Date().getFullYear();
-  const academicYears = Array.from({ length: 2040 - currentYear + 5 }, (_, i) => {
-    const startYear = currentYear - 1 + i;
-    return `${startYear}-${(startYear + 1).toString().slice(-2)}`;
-  });
-  const [selectedYear, setSelectedYear] = useState(academicYears[1]);
-
-  const calculateClassCounts = (data: Student[]) => {
-    const counts = classNames.reduce((acc, cls) => {
-      if (cls === 'all') {
-        acc[cls] = data.length;
-        return acc;
-      }
-      acc[cls] = data.filter(s => (s.classes?.name) === cls).length;
-      return acc;
-    }, {} as Record<string, number>);
-    setClassCounts(counts);
-  };
-
-  const fetchStudents = async () => {
-    try {
-      const resp = await apiFetch('/api/students');
-      if (!resp.ok) throw new Error('Backend error');
-      const data = await resp.json();
-      
-      setStudents(data);
-      calculateClassCounts(data);
-    } catch (err: any) {
-      console.error('Unexpected portal error:', err);
-      toast({
-        variant: 'destructive',
-        title: 'Connection Error',
-        description: err.message || 'Database connection failed.',
-      });
-    }
-  };
 
   const handleRemoveAllStudents = async () => {
     setIsRemoving(true);
@@ -123,7 +91,7 @@ export default function Students() {
       });
 
       toast({ title: '🗑️ All Students Removed', description: 'All student records have been deleted successfully.' });
-      fetchStudents();
+      queryClient.invalidateQueries({ queryKey: ['student-counts'] });
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Delete Failed', description: err.message || 'Could not remove students.' });
     } finally {
@@ -553,7 +521,7 @@ export default function Students() {
           toast({ variant: 'destructive', title: `⚠️ ${allErrors.length} Rows Skipped`, description: preview + (allErrors.length > 3 ? ` ...and ${allErrors.length - 3} more` : '') });
         }
 
-        fetchStudents();
+        queryClient.invalidateQueries({ queryKey: ['student-counts'] });
 
       } catch (err: any) {
         console.error('Bulk upload error:', err);

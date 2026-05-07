@@ -69,7 +69,7 @@ export default function PendingFees() {
 
   useEffect(() => {
     fetchPendingData();
-  }, [activeTab]);
+  }, [activeTab, selectedClass]);
 
   const fetchClasses = async () => {
     const { data } = await supabase
@@ -82,11 +82,21 @@ export default function PendingFees() {
   const fetchPendingData = async () => {
     setIsLoading(true);
     try {
-      const { data: studentsData } = await supabase
+      let selectClause = 'id, full_name, class_id, father_phone, mother_phone, term1_fee, term2_fee, term3_fee, old_dues, has_books, books_fee, has_transport, transport_fee, has_accessories, accessories_fee, classes(name)';
+      if (selectedClass !== 'all') {
+        selectClause = 'id, full_name, class_id, father_phone, mother_phone, term1_fee, term2_fee, term3_fee, old_dues, has_books, books_fee, has_transport, transport_fee, has_accessories, accessories_fee, classes!inner(name)';
+      }
+
+      let query = supabase
         .from('students')
-        .select('id, full_name, class_id, father_phone, mother_phone, term1_fee, term2_fee, term3_fee, old_dues, has_books, books_fee, has_transport, transport_fee, has_accessories, accessories_fee, classes(name)')
-        .eq('is_active', true)
-        .order('full_name');
+        .select(selectClause)
+        .eq('is_active', true);
+
+      if (selectedClass !== 'all') {
+        query = query.eq('class_id', selectedClass);
+      }
+      
+      const { data: studentsData } = await query.order('full_name');
 
       const [coursePaymentsRes, booksPaymentsRes, transportPaymentsRes, accessoriesPaymentsRes] = await Promise.all([
         supabase

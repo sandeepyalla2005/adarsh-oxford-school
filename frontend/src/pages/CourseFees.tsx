@@ -107,8 +107,11 @@ export default function CourseFees() {
 
   useEffect(() => {
     fetchClasses();
-    fetchStudentsWithFees();
   }, []);
+
+  useEffect(() => {
+    fetchStudentsWithFees();
+  }, [selectedClass]); // Refetch when class changes
 
   const fetchClasses = async () => {
     const { data } = await supabase
@@ -119,13 +122,24 @@ export default function CourseFees() {
   };
 
   const fetchStudentsWithFees = async () => {
+    setIsLoading(true);
     try {
-      // Fetch all students with their fee columns
-      const { data: studentsData, error: studentsError } = await supabase
+      // Fetch only students for the selected class if not "all"
+      let selectClause = 'id, admission_number, full_name, class_id, father_phone, mother_phone, term1_fee, term2_fee, term3_fee, old_dues, classes(name)';
+      if (selectedClass !== 'all') {
+        selectClause = 'id, admission_number, full_name, class_id, father_phone, mother_phone, term1_fee, term2_fee, term3_fee, old_dues, classes!inner(name)';
+      }
+
+      let query = supabase
         .from('students')
-        .select('id, admission_number, full_name, class_id, father_phone, mother_phone, term1_fee, term2_fee, term3_fee, old_dues, classes(name)')
-        .eq('is_active', true)
-        .order('full_name');
+        .select(selectClause)
+        .eq('is_active', true);
+
+      if (selectedClass !== 'all') {
+        query = query.eq('classes.name', selectedClass);
+      }
+      
+      const { data: studentsData, error: studentsError } = await query.order('full_name');
 
       if (studentsError) throw studentsError;
 
