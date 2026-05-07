@@ -104,8 +104,12 @@ export default function Students() {
         role: userRole || 'admin'
       });
 
+      // Force clear backend cache
+      await apiFetch('/api/students/clear-cache', { method: 'POST' });
+      
       toast({ title: '🗑️ All Students Removed', description: 'All student records have been deleted successfully.' });
       queryClient.invalidateQueries({ queryKey: ['student-counts'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Delete Failed', description: err.message || 'Could not remove students.' });
     } finally {
@@ -535,7 +539,11 @@ export default function Students() {
           toast({ variant: 'destructive', title: `⚠️ ${allErrors.length} Rows Skipped`, description: preview + (allErrors.length > 3 ? ` ...and ${allErrors.length - 3} more` : '') });
         }
 
+        // Force clear backend cache to ensure new counts reflect immediately
+        await apiFetch('/api/students/clear-cache', { method: 'POST' });
+
         queryClient.invalidateQueries({ queryKey: ['student-counts'] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
 
       } catch (err: any) {
         console.error('Bulk upload error:', err);

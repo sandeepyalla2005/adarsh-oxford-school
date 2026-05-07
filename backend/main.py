@@ -235,20 +235,43 @@ def get_student_counts():
         if cached is not None:
             return cached
 
-        # Use an RPC or aggregate query to get counts per class
-        # For simplicity and cross-DB compatibility, we'll fetch just class_id and name
-        # But even better: fetch all active students but only the class_id field
-        response = supabase.table("students").select("class_id, classes(name)").eq("is_active", True).execute()
+        # Fetch classes to know which ones to count
+        classes_res = supabase.table("classes").select("id, name").order("sort_order").execute()
+        class_list = classes_res.data or []
         
-        counts: dict[str, int] = {"all": len(response.data)}
-        for s in response.data:
-            cls_name = s.get("classes", {}).get("name")
-            if cls_name:
-                counts[cls_name] = counts.get(cls_name, 0) + 1
+        counts: dict[str, int] = {"all": 0}
+        
+        # Optimized: Parallel execution for class counts
+        def fetch_class_count(cls):
+            try:
+                res = supabase.table("students").select("id", count="exact", head=True).eq("class_id", cls["id"]).eq("is_active", True).execute()
+                return cls["name"], int(res.count or 0)
+            except:
+                return cls["name"], 0
+
+        with ThreadPoolExecutor(max_workers=min(len(class_list), 10) or 1) as executor:
+            results = list(executor.map(fetch_class_count, class_list))
+            
+        for cls_name, count in results:
+            counts[cls_name] = count
+            counts["all"] += count
         
         return cache_set("students:counts", counts, READ_CACHE_TTL_SECONDS)
     except Exception as e:
         logger.error(f"Error fetching student counts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/students/clear-cache")
+def clear_student_cache():
+    try:
+        global _cache
+        # Clear all student and dashboard related keys
+        keys_to_clear = [k for k in _cache.keys() if k.startswith("students:") or k.startswith("dashboard:") or k.startswith("class-students:")]
+        for k in keys_to_clear:
+            _cache.pop(k, None)
+        logger.info(f"Cleared {len(keys_to_clear)} student-related cache keys.")
+        return {"status": "success", "cleared_count": len(keys_to_clear)}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/students")
