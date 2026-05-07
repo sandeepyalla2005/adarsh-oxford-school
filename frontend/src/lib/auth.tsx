@@ -33,6 +33,7 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<{ error: Error | null }>;
 }
 
+const ROLE_FETCH_TIMEOUT = 15000; // Increased to 15s to handle slow cold starts
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -63,8 +64,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Optimized fetch with faster safety timeout (5s)
-  const fetchUserRoleWithTimeout = async (userId: string, timeoutMs = 5000): Promise<UserRole> => {
+  // Optimized fetch with safety timeout (default 15s)
+  const fetchUserRoleWithTimeout = async (userId: string, timeoutMs = ROLE_FETCH_TIMEOUT): Promise<UserRole> => {
     console.log('Fetching role for ID:', userId);
 
     const timeoutPromise = new Promise<null>((resolve) =>
@@ -144,13 +145,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // Get session with timeout to prevent hanging
         const sessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Session fetch timeout')), 3000)
+        const sessionTimeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Session fetch timeout')), 5000) // 5s for session
         );
 
         let existingSession;
         try {
-          const { data } = await Promise.race([sessionPromise, timeoutPromise]) as any;
+          const { data } = await Promise.race([sessionPromise, sessionTimeoutPromise]) as any;
           existingSession = data?.session;
         } catch (err) {
           console.error('⚠️ Session fetch failed or timed out:', err);

@@ -8,41 +8,65 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { getPortalDashboardPath, getPortalFromRole, portalPath, type PortalType } from "@/lib/portal";
 import Auth from "./pages/Auth";
-const Dashboard = lazy(() => import("./pages/Dashboard"));
-const Students = lazy(() => import("./pages/Students"));
-const ClassStudents = lazy(() => import("./pages/ClassStudents"));
-const CourseFees = lazy(() => import("./pages/CourseFees"));
-const BooksFees = lazy(() => import("./pages/BooksFees"));
-const TransportFees = lazy(() => import("./pages/TransportFees"));
-const FeeHistory = lazy(() => import("./pages/FeeHistory"));
-const PendingFees = lazy(() => import("./pages/PendingFees"));
-const AccessoriesHistory = lazy(() => import("./pages/AccessoriesHistory"));
-const AccessoriesUniform = lazy(() => import("./pages/AccessoriesUniform"));
-const UniformIssue = lazy(() => import("./pages/UniformIssue"));
-const AccessoryIssue = lazy(() => import("./pages/AccessoryIssue"));
-const AccessoryReceiptPage = lazy(() => import("./pages/AccessoryReceiptPage"));
-const UserManagement = lazy(() => import("./pages/UserManagement"));
-const FeeStructure = lazy(() => import("./pages/FeeStructure"));
-const Settings = lazy(() => import("./pages/Settings"));
-const TimeTable = lazy(() => import("./pages/TimeTable"));
-const AcademicCalendar = lazy(() => import("./pages/AcademicCalendar"));
-const StaffManagement = lazy(() => import("./pages/StaffManagement"));
-const NotFound = lazy(() => import("./pages/NotFound"));
-const Sms = lazy(() => import("./pages/Sms"));
-const StaffProfile = lazy(() => import("./pages/staff/StaffProfile"));
-const Attendance = lazy(() => import("./pages/staff/Attendance"));
-const Homework = lazy(() => import("./pages/staff/Homework"));
-const Notices = lazy(() => import("./pages/staff/Notices"));
-const AcademicReports = lazy(() => import("./pages/staff/AcademicReports"));
-const StaffSchedule = lazy(() => import("./pages/staff/StaffSchedule"));
-const Receipt = lazy(() => import("./pages/Receipt"));
-const DatabaseCheck = lazy(() => import("./pages/DatabaseCheck"));
-const AdminAttendance = lazy(() => import("./pages/admin/AdminAttendance"));
-const AdminHomework = lazy(() => import("./pages/admin/AdminHomework"));
-const AdminAudit = lazy(() => import("./pages/AdminAudit"));
-const FeeAnalytics = lazy(() => import("./pages/FeeAnalytics"));
-const AccessoriesFees = lazy(() => import("./pages/AccessoriesFees"));
-const TableRegistryCheck = lazy(() => import("./pages/TableRegistryCheck"));
+
+// Helper to handle ChunkLoadError by forcing a reload
+const lazyWithRetry = (componentImport: () => Promise<any>) => 
+  lazy(async () => {
+    const pageHasBeenForceRefreshed = JSON.parse(
+      window.sessionStorage.getItem('page-has-been-force-refreshed') || 'false'
+    );
+
+    try {
+      const component = await componentImport();
+      window.sessionStorage.setItem('page-has-been-force-refreshed', 'false');
+      return component;
+    } catch (error) {
+      if (!pageHasBeenForceRefreshed) {
+        // Log the error and force refresh
+        console.error('Lazy loading failed, forcing refresh...', error);
+        window.sessionStorage.setItem('page-has-been-force-refreshed', 'true');
+        return window.location.reload();
+      }
+      // If we already refreshed and it still fails, throw the error
+      throw error;
+    }
+  });
+
+const Dashboard = lazyWithRetry(() => import("./pages/Dashboard"));
+const Students = lazyWithRetry(() => import("./pages/Students"));
+const ClassStudents = lazyWithRetry(() => import("./pages/ClassStudents"));
+const CourseFees = lazyWithRetry(() => import("./pages/CourseFees"));
+const BooksFees = lazyWithRetry(() => import("./pages/BooksFees"));
+const TransportFees = lazyWithRetry(() => import("./pages/TransportFees"));
+const FeeHistory = lazyWithRetry(() => import("./pages/FeeHistory"));
+const PendingFees = lazyWithRetry(() => import("./pages/PendingFees"));
+const AccessoriesHistory = lazyWithRetry(() => import("./pages/AccessoriesHistory"));
+const AccessoriesUniform = lazyWithRetry(() => import("./pages/AccessoriesUniform"));
+const UniformIssue = lazyWithRetry(() => import("./pages/UniformIssue"));
+const AccessoryIssue = lazyWithRetry(() => import("./pages/AccessoryIssue"));
+const AccessoryReceiptPage = lazyWithRetry(() => import("./pages/AccessoryReceiptPage"));
+const UserManagement = lazyWithRetry(() => import("./pages/UserManagement"));
+const FeeStructure = lazyWithRetry(() => import("./pages/FeeStructure"));
+const Settings = lazyWithRetry(() => import("./pages/Settings"));
+const TimeTable = lazyWithRetry(() => import("./pages/TimeTable"));
+const AcademicCalendar = lazyWithRetry(() => import("./pages/AcademicCalendar"));
+const StaffManagement = lazyWithRetry(() => import("./pages/StaffManagement"));
+const NotFound = lazyWithRetry(() => import("./pages/NotFound"));
+const Sms = lazyWithRetry(() => import("./pages/Sms"));
+const StaffProfile = lazyWithRetry(() => import("./pages/staff/StaffProfile"));
+const Attendance = lazyWithRetry(() => import("./pages/staff/Attendance"));
+const Homework = lazyWithRetry(() => import("./pages/staff/Homework"));
+const Notices = lazyWithRetry(() => import("./pages/staff/Notices"));
+const AcademicReports = lazyWithRetry(() => import("./pages/staff/AcademicReports"));
+const StaffSchedule = lazyWithRetry(() => import("./pages/staff/StaffSchedule"));
+const Receipt = lazyWithRetry(() => import("./pages/Receipt"));
+const DatabaseCheck = lazyWithRetry(() => import("./pages/DatabaseCheck"));
+const AdminAttendance = lazyWithRetry(() => import("./pages/admin/AdminAttendance"));
+const AdminHomework = lazyWithRetry(() => import("./pages/admin/AdminHomework"));
+const AdminAudit = lazyWithRetry(() => import("./pages/AdminAudit"));
+const FeeAnalytics = lazyWithRetry(() => import("./pages/FeeAnalytics"));
+const AccessoriesFees = lazyWithRetry(() => import("./pages/AccessoriesFees"));
+const TableRegistryCheck = lazyWithRetry(() => import("./pages/TableRegistryCheck"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
