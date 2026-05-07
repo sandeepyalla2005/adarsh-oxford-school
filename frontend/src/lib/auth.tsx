@@ -33,7 +33,8 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<{ error: Error | null }>;
 }
 
-const ROLE_FETCH_TIMEOUT = 5000; // Reduced to 5s for faster feedback
+const ROLE_FETCH_TIMEOUT = 10000; // Increased to 10s for stability
+const ROLE_FETCH_RETRIES = 2; // Added retries
 const ROLE_CACHE_KEY_PREFIX = 'user_role_';
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -95,64 +96,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
 
     const roleFetchPromise = (async () => {
-      try {
-        // Try RPC first (more secure/direct)
-        const { data, error } = await supabase.rpc('get_user_roles', {
-          p_user_id: userId
-        });
-
-        let resolvedRole: UserRole = null;
-
-        if (error) {
-          console.error('RPC Role Error:', error);
-          // Fallback to direct table query
-          const { data: tableData, error: tableError } = await supabase
-            .from('user_roles')
-            .select('role')
-            .eq('user_id', userId);
-
-          if (tableError) {
-            console.error('Table Fallback Error:', tableError);
-          } else {
-            const roles = (tableData || []).map((r: any) => r.role as string);
-            console.log('Fallback Roles Found:', roles);
-            if (roles.includes('admin')) resolvedRole = 'admin';
-            else if (roles.includes('feeInCharge')) resolvedRole = 'feeInCharge';
-            else if (roles.includes('staff')) resolvedRole = 'staff';
-          }
-        } else {
-          const rolesList = (data as any[] || []).map((r: any) =>
-            (typeof r === 'string' ? r : (r.role || r)) as string
-          );
-
-          console.log('RPC Roles Found:', rolesList);
-          if (rolesList.includes('admin')) resolvedRole = 'admin';
-          else if (rolesList.includes('feeInCharge')) resolvedRole = 'feeInCharge';
-          else if (rolesList.includes('staff')) resolvedRole = 'staff';
-        }
-
-        // If we found a role and it's staff, check for designation promotion
-        if (resolvedRole === 'staff') {
-          const { data: profileData } = await supabase
-            .from('profiles')
-            .select('designation')
-            .eq('user_id', userId)
-            .single();
+      for (let attempt = 0; attempt <= ROLE_FETCH_RETRIES; attempt++) {
+        try {
+          if (attempt > 0) console.log(`Retry attempt ${attempt} for role fetch...`);
           
-          if (profileData?.designation === 'Fee In-Charge') {
-            console.log('Promoting Staff to feeInCharge based on designation');
-            resolvedRole = 'feeInCharge';
-          }
-        }
+          // Try RPC first (more secure/direct)
+          const { data, error } = await supabase.rpc('get_user_roles', {
+            p_user_id: userId
+          });
 
-        if (resolvedRole) {
-          setCachedRole(userId, resolvedRole);
+          let resolvedRole: UserRole = null;
+
+          if (error) {
+            // Fallback to direct table query
+            const { data: tableData, error: tableError } = await supabase
+              .from('user_roles')
+              .select('role')
+              .eq('user_id', userId);
+
+            if (!tableError) {
+              const roles = (tableData || []).map((r: any) => r.role as string);
+              if (roles.includes('admin')) resolvedRole = 'admin';
+              else if (roles.includes('feeInCharge')) resolvedRole = 'feeInCharge';
+              else if (roles.includes('staff')) resolvedRole = 'staff';
+            }
+          } else {
+            const rolesList = (data as any[] || []).map((r: any) =>
+              (typeof r === 'string' ? r : (r.role || r)) as string
+            );
+            if (rolesList.includes('admin')) resolvedRole = 'admin';
+            else if (rolesList.includes('feeInCharge')) resolvedRole = 'feeInCharge';
+            else if (rolesList.includes('staff')) resolvedRole = 'staff';
+          }
+
+          if (resolvedRole) return resolvedRole;
+        } catch (err) {
+          console.error(`Role fetch attempt ${attempt} failed:`, err);
         }
-        return resolvedRole;
-      } catch (err) {
-        console.error('Critical Role Fetch Failure:', err);
-        return null;
+        // Small delay before retry
+        if (attempt < ROLE_FETCH_RETRIES) await new Promise(r => setTimeout(r, 500 * attempt));
       }
+      return null;
     })();
 
     const winner = await Promise.race([roleFetchPromise, timeoutPromise]);
@@ -167,7 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Get session with timeout to prevent hanging
         const sessionPromise = supabase.auth.getSession();
         const sessionTimeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Session fetch timeout')), 5000) // 5s for session
+          setTimeout(() => reject(new Error('Session fetch timeout')), 10000) // 10s for session
         );
 
         let existingSession;
@@ -275,9 +259,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (!isMatched) {
           console.warn('Role mismatch! Expected:', expectedRole, 'but found:', activeRole);
-          await supabase.auth.signOut();
+          // Don't sign out automatically, just deny the login to this portal
           return {
-            error: new Error(`This account does not have permission to access the ${expectedRole} portal. Current role: ${activeRole || 'none'}`)
+            error: new Error(`This account does not have permission to access the ${expectedRole} portal.`)
           };
         }
       }

@@ -235,31 +235,38 @@ def get_student_counts():
         if cached is not None:
             return cached
 
-        # Fetch classes to know which ones to count
+        # 1. Get total count immediately (Fast)
+        total_res = supabase.table("students").select("id", count="exact", head=True).eq("is_active", True).execute()
+        total_active = int(total_res.count or 0)
+        
+        counts: dict[str, int] = {"all": total_active}
+
+        # 2. Get class-specific counts
         classes_res = supabase.table("classes").select("id, name").order("sort_order").execute()
         class_list = classes_res.data or []
         
-        counts: dict[str, int] = {"all": 0}
-        
-        # Optimized: Parallel execution for class counts
-        def fetch_class_count(cls):
-            try:
-                res = supabase.table("students").select("id", count="exact", head=True).eq("class_id", cls["id"]).eq("is_active", True).execute()
-                return cls["name"], int(res.count or 0)
-            except:
-                return cls["name"], 0
+        if class_list:
+            def fetch_class_count(cls):
+                try:
+                    # Ensure ID is a string for the query
+                    cid = str(cls["id"])
+                    res = supabase.table("students").select("id", count="exact", head=True).eq("class_id", cid).eq("is_active", True).execute()
+                    return cls["name"], int(res.count or 0)
+                except Exception as e:
+                    logger.error(f"Error counting for class {cls.get('name')}: {e}")
+                    return cls["name"], 0
 
-        with ThreadPoolExecutor(max_workers=min(len(class_list), 10) or 1) as executor:
-            results = list(executor.map(fetch_class_count, class_list))
-            
-        for cls_name, count in results:
-            counts[cls_name] = count
-            counts["all"] += count
+            with ThreadPoolExecutor(max_workers=min(len(class_list), 10) or 1) as executor:
+                results = list(executor.map(fetch_class_count, class_list))
+                
+            for cls_name, count in results:
+                counts[cls_name] = count
         
         return cache_set("students:counts", counts, READ_CACHE_TTL_SECONDS)
     except Exception as e:
-        logger.error(f"Error fetching student counts: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Critical error in get_student_counts: {e}")
+        # Final fallback: return at least a 0 structure
+        return {"all": 0}
 
 @app.post("/api/students/clear-cache")
 def clear_student_cache():
