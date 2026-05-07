@@ -43,7 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   // Fetch profile for the current user
-  const fetchProfile = async (userId: string) => {
+  const fetchProfile = async (userId: string): Promise<Profile | null> => {
     try {
       const { data: profileList, error } = await supabase
         .from('profiles')
@@ -52,10 +52,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .limit(1);
 
       if (!error && profileList && profileList.length > 0) {
-        setProfile(profileList[0] as Profile);
+        const foundProfile = profileList[0] as Profile;
+        setProfile(foundProfile);
+        return foundProfile;
       }
+      return null;
     } catch (err) {
       console.error('Error fetching profile:', err);
+      return null;
     }
   };
 
@@ -159,15 +163,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setSession(existingSession);
           setUser(existingSession.user);
           // Parallelize profile and role fetching for speed
-          const [role] = await Promise.all([
+          const [role, foundProfile] = await Promise.all([
             fetchUserRoleWithTimeout(existingSession.user.id),
             fetchProfile(existingSession.user.id)
           ]);
 
           try {
-              const finalRole = (role === 'staff' && profile?.designation === 'Fee In-Charge') ? 'feeInCharge' : (role || 'staff');
+              // Use the profile we just fetched instead of stale state
+              const finalRole = (role === 'staff' && foundProfile?.designation === 'Fee In-Charge') ? 'feeInCharge' : (role || 'staff');
+              console.log('Final resolved role:', finalRole);
               setUserRole(finalRole);
-              fetchProfile(existingSession.user.id);
           } catch (err) {
             console.error('Role resolution failed:', err);
             setUserRole('staff'); // Safe fallback instead of getting stuck on null

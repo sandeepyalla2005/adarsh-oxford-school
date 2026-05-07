@@ -256,8 +256,12 @@ export default function ClassStudents() {
         if (statusFilter === 'active' && studentStatus !== 'active') return false;
         if (statusFilter === 'dropout' && studentStatus !== 'dropout') return false;
 
+        // We trust the backend to return students for the correct class, 
+        // as the className comparison here is prone to case-sensitivity issues.
         const studentClass = student.classes?.name || '';
-        if (className !== 'all' && studentClass !== className) return false;
+        if (className && className !== 'all' && studentClass) {
+            if (studentClass.toLowerCase() !== className.toLowerCase()) return false;
+        }
 
         const studentName = student.full_name || student.name || '';
         const fatherName = student.father_name || student.father || '';
@@ -281,6 +285,17 @@ export default function ClassStudents() {
         const now = new Date();
         const year = now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1;
         return new Date(year, 5, 1);
+    };
+
+    const formatDateSafe = (dateStr: string | undefined | null, formatStr: string = 'dd MMM yyyy') => {
+        if (!dateStr) return 'N/A';
+        try {
+            const date = new Date(dateStr);
+            if (isNaN(date.getTime())) return 'N/A';
+            return format(date, formatStr);
+        } catch (e) {
+            return 'N/A';
+        }
     };
 
     const isNewAdmission = (student: Student) => {
@@ -1583,7 +1598,7 @@ export default function ClassStudents() {
                                             <div className="space-y-3 bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
                                                 <div className="flex justify-between items-center"><span className="text-sm font-bold text-slate-500">Admission No</span> <span className="text-sm font-black text-[#002147]">{getAdmissionNumber(selectedStudent)}</span></div>
                                                 <div className="flex justify-between items-center"><span className="text-sm font-bold text-slate-500">Student Type</span> <Badge variant="outline" className="capitalize">{selectedStudent.student_type}</Badge></div>
-                                                <div className="flex justify-between items-center"><span className="text-sm font-bold text-slate-500">Joining Date</span> <span className="text-sm font-bold">{selectedStudent.joining_date ? format(new Date(selectedStudent.joining_date), 'dd MMM yyyy') : '-'}</span></div>
+                                                <div className="flex justify-between items-center"><span className="text-sm font-bold text-slate-500">Joining Date</span> <span className="text-sm font-bold">{formatDateSafe(selectedStudent.joining_date)}</span></div>
                                                 <div className="flex justify-between items-center"><span className="text-sm font-bold text-slate-500">Gender</span> <span className="text-sm font-bold">{selectedStudent.gender || 'N/A'}</span></div>
                                             </div>
                                         </section>
@@ -1591,7 +1606,7 @@ export default function ClassStudents() {
                                         <section>
                                             <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 mb-4">Personal Details</h3>
                                             <div className="space-y-3 bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
-                                                <div className="flex justify-between items-center"><span className="text-sm font-bold text-slate-500 flex items-center gap-2"><Calendar className="h-3.5 w-3.5" /> Date of Birth</span> <span className="text-sm font-bold">{selectedStudent.dob ? format(new Date(selectedStudent.dob), 'dd MMM yyyy') : 'N/A'}</span></div>
+                                                <div className="flex justify-between items-center"><span className="text-sm font-bold text-slate-500 flex items-center gap-2"><Calendar className="h-3.5 w-3.5" /> Date of Birth</span> <span className="text-sm font-bold">{formatDateSafe(selectedStudent.dob)}</span></div>
                                                 <div className="flex justify-between items-center"><span className="text-sm font-bold text-slate-500 flex items-center gap-2"><div className="h-3.5 w-3.5 rounded-full border border-slate-400 flex items-center justify-center text-[8px] font-bold">A</div> Aadhaar No</span> <span className="text-sm font-bold">{selectedStudent.aadhaar || 'N/A'}</span></div>
                                                 <div className="flex flex-col gap-1 mt-2">
                                                     <span className="text-sm font-bold text-slate-500 flex items-center gap-2"><MapPin className="h-3.5 w-3.5" /> Home Address</span>
@@ -1735,7 +1750,7 @@ export default function ClassStudents() {
                                                     {log.action_type}
                                                 </Badge>
                                                 <p className="text-xs text-slate-500">
-                                                    {format(new Date(log.created_at), 'MMM dd, yyyy • hh:mm a')}
+                                                    {formatDateSafe(log.created_at, 'MMM dd, yyyy • hh:mm a')}
                                                 </p>
                                             </div>
                                             <div className="text-right">
