@@ -645,6 +645,14 @@ async def create_accessory_payment(payment: AccessoryPayment, user=Depends(get_c
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/health-check")
+def health_check():
+    return {
+        "status": "online",
+        "supabase_url_prefix": url[:15] if url else "missing",
+        "project_id": os.environ.get("VITE_SUPABASE_PROJECT_ID", "missing")
+    }
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
