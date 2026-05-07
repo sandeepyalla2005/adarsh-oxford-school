@@ -363,21 +363,117 @@ def get_dashboard_stats(user=Depends(get_current_user)):
         logger.info("Fetching fresh dashboard stats...")
         
         def count_students(filters: dict[str, str] | None = None) -> int:
-            query = supabase.table("students").select("id", count="exact", head=True).eq("is_active", True)
-            if filters:
-                for key, value in filters.items():
-                    query = query.eq(key, value)
-            response = query.execute()
-            return int(response.count or 0)
+            try:
+                query = supabase.table("students").select("id", count="exact", head=True).eq("is_active", True)
+                if filters:
+                    for key, value in filters.items():
+                        query = query.eq(key, value)
+                response = query.execute()
+                return int(response.count or 0)
+            except Exception as e:
+                logger.error(f"Error in count_students: {e}")
+                return 0
 
-        # Run sequentially for better stability and debugging
-        total_count = count_students()
-        new_count = count_students({"student_type": "new"})
+        def get_income_stats(days: int | None = None) -> float:
+            tables = ["course_payments", "books_payments", "transport_payments", "accessory_sales", "student_accessory_payments", "accessory_transactions"]
+            total = 0.0
+            since_date = None
+            if days is not None:
+                since_date = (datetime.now() - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            for table in tables:
+                try:
+                    amount_col = "amount_paid"
+                    if table == "accessory_sales": amount_col = "total_amount"
+                    
+                    query = supabase.table(table).select(amount_col)
+                    if since_date:
+                        query = query.gte("created_at", since_date.isoformat())
+                    
+                    res = query.execute()
+                    if res.data:
+                        total += sum(float(row.get(amount_col) or 0) for row in res.data)
+                except Exception as e:
+                    logger.debug(f"Note: Table {table} not found or inaccessible: {e}")
+            return total
+
+        def get_expected_fees() -> float:
+            try:
+                res = supabase.table("students").select("term1_fee, term2_fee, term3_fee, old_dues, books_fee, transport_fee").eq("is_active", True).execute()
+                total = 0.0
+                for s in res.data:
+                    total += float(s.get("term1_fee") or 0)
+                    total += float(s.get("term2_fee") or 0)
+                    total += float(s.get("term3_fee") or 0)
+                    total += float(s.get("old_dues") or 0)
+                    total += float(s.get("books_fee") or 0)
+                    total += float(s.get("transport_fee") or 0)
+                return total
+            except Exception as e:
+                logger.error(f"Error in get_expected_fees: {e}")
+                return 0.0
+
+        def get_monthly_income_data() -> list[dict[str, Any]]:
+            months = []
+            now = datetime.now()
+            for i in range(5, -1, -1):
+                start_of_month = (now - timedelta(days=i*30)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                end_of_month = (start_of_month + timedelta(days=32)).replace(day=1) - timedelta(seconds=1)
+                
+                income = get_income_stats_for_range(start_of_month, end_of_month)
+                month_name = start_of_month.strftime("%b")
+                
+                months.append({
+                    "name": month_name,
+                    "amount": income,
+                    "displayLabel": f"₹{int(income/1000)}k" if income >= 1000 else f"₹{int(income)}",
+                    "amountFormatted": f"₹{income:,.0f}"
+                })
+            return months
+
+        def get_income_stats_for_range(start: datetime, end: datetime) -> float:
+            tables = ["course_payments", "books_payments", "transport_payments", "accessory_sales", "student_accessory_payments", "accessory_transactions"]
+            total = 0.0
+            for table in tables:
+                try:
+                    amount_col = "amount_paid"
+                    if table == "accessory_sales": amount_col = "total_amount"
+                    query = supabase.table(table).select(amount_col).gte("created_at", start.isoformat()).lte("created_at", end.isoformat())
+                    res = query.execute()
+                    if res.data:
+                        total += sum(float(row.get(amount_col) or 0) for row in res.data)
+                except:
+                    pass
+            return total
+
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            total_future = executor.submit(count_students)
+            new_future = executor.submit(count_students, {"student_type": "new"})
+            today_income_future = executor.submit(get_income_stats, 0)
+            weekly_income_future = executor.submit(get_income_stats, 7)
+            monthly_income_future = executor.submit(get_income_stats, 30)
+            total_income_future = executor.submit(get_income_stats)
+            expected_fees_future = executor.submit(get_expected_fees)
+            monthly_data_future = executor.submit(get_monthly_income_data)
+            
+            total_count = total_future.result()
+            new_count = new_future.result()
+            today_income = today_income_future.result()
+            weekly_income = weekly_income_future.result()
+            monthly_income = monthly_income_future.result()
+            total_collected = total_income_future.result()
+            expected_total = expected_fees_future.result()
+            monthly_chart_data = monthly_data_future.result()
 
         result = {
             "totalStudents": total_count,
             "newStudents": new_count,
             "oldStudents": max(total_count - new_count, 0),
+            "todayIncome": today_income,
+            "weeklyIncome": weekly_income,
+            "monthlyIncome": monthly_income,
+            "pendingFees": max(expected_total - total_collected, 0),
+            "monthlyChartData": monthly_chart_data,
             "lastUpdated": datetime.now().isoformat()
         }
         return cache_set("dashboard:stats", result, STATS_CACHE_TTL_SECONDS)

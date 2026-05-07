@@ -129,21 +129,27 @@ export default function Dashboard() {
         const data = await resp.json();
 
         const totalStudents = Number(data.totalStudents) || 0;
-        const calculatedNewStudents =
-          Number.isFinite(Number(data.newStudents))
-            ? Number(data.newStudents)
-            : 0;
-        const calculatedOldStudents =
-          Number.isFinite(Number(data.oldStudents))
-            ? Number(data.oldStudents)
-            : Math.max(totalStudents - calculatedNewStudents, 0);
+        const newStudents = Number(data.newStudents) || 0;
+        const oldStudents = Number(data.oldStudents) || 0;
+        const todayIncome = Number(data.todayIncome) || 0;
+        const weeklyIncome = Number(data.weeklyIncome) || 0;
+        const monthlyIncome = Number(data.monthlyIncome) || 0;
+        const pendingFees = Number(data.pendingFees) || 0;
 
         setStats(prev => ({
           ...prev,
           totalStudents,
-          newStudents: calculatedNewStudents,
-          oldStudents: calculatedOldStudents,
+          newStudents,
+          oldStudents,
+          todayIncome,
+          weeklyIncome,
+          monthlyIncome,
+          pendingCourse: pendingFees, // Combined pending
         }));
+
+        if (data.monthlyChartData) {
+          setMonthlyData(data.monthlyChartData);
+        }
         
         setLastUpdated(new Date(data.lastUpdated));
         setShowStudentBreakdown(false);

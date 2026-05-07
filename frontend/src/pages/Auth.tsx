@@ -289,7 +289,7 @@ export default function Auth({ allowedRoles }: AuthProps = {}) {
             <div className="rounded-[1.5rem] border border-slate-100 bg-white p-5 shadow-sm sm:p-6">
               <div className="flex items-center gap-4">
                 <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-white shadow-sm">
-                  <img src="/school-logo-official.png" alt="School Logo" className="h-11 w-11 object-contain" />
+                  <img src="/school-logo.png" alt="School Logo" className="h-11 w-11 object-contain" />
                 </div>
                 <div>
                   <p className="text-[11px] uppercase tracking-[0.35em] text-slate-400">Adarsh Oxford</p>

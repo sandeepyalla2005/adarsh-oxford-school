@@ -49,8 +49,20 @@ export function buildApiUrl(
   return baseUrl ? url.toString() : `${url.pathname}${url.search}`;
 }
 
+let _sessionCache: { session: any; expires: number } | null = null;
+
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  const { data: { session } } = await supabase.auth.getSession();
+  let session = null;
+  const now = Date.now();
+
+  if (_sessionCache && _sessionCache.expires > now) {
+    session = _sessionCache.session;
+  } else {
+    const { data } = await supabase.auth.getSession();
+    session = data.session;
+    // Cache session for 10 seconds to reduce overhead on burst requests
+    _sessionCache = { session, expires: now + 10000 };
+  }
   
   const headers = new Headers(init?.headers);
   if (session?.access_token) {

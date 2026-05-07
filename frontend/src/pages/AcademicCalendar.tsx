@@ -36,13 +36,16 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
 import { getCurrentAcademicYear } from '@/lib/academic-year';
 
-const CLASSES = [
-    'Nursery', 'LKG', 'UKG',
-    'Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5',
-    'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10'
-];
-
 export default function AcademicCalendar() {
+    const [classes, setClasses] = useState<string[]>([]);
+    useEffect(() => {
+        async function fetchClasses() {
+            const { data } = await supabase.from('classes').select('name').order('sort_order');
+            if (data) setClasses(data.map(c => c.name));
+        }
+        fetchClasses();
+    }, []);
+
     const { userRole, isAdmin: isSystemAdmin } = useAuth();
     const canManage = isSystemAdmin || userRole === 'feeInCharge';
     const [selectedClass, setSelectedClass] = useState<string | null>(null);
@@ -162,34 +165,37 @@ export default function AcademicCalendar() {
                             </div>
 
                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
-                                {CLASSES.map((className, index) => (
-                                    <motion.div
-                                        key={className}
-                                        initial={{ opacity: 0, y: 20 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        transition={{ delay: index * 0.05 }}
-                                        onClick={() => setSelectedClass(className)}
-                                        className="group relative cursor-pointer overflow-hidden rounded-[24px] bg-white p-6 shadow-sm ring-1 ring-slate-100 transition-all duration-300 hover:-translate-y-2 hover:shadow-2xl hover:shadow-blue-900/10 hover:ring-blue-50"
-                                    >
-                                        <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-gradient-to-br from-blue-50 to-indigo-50 opacity-0 transition-all duration-500 group-hover:opacity-100 group-hover:scale-150" />
+                                {classes.map((className, index) => {
+                                    const hasCalendar = existingCalendars.some(c => c.class_name === className);
+                                    return (
+                                        <motion.div
+                                            key={className}
+                                            initial={{ opacity: 0, y: 20 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            transition={{ delay: index * 0.05 }}
+                                            onClick={() => setSelectedClass(className)}
+                                            className="group relative cursor-pointer overflow-hidden rounded-[24px] bg-white p-6 shadow-sm ring-1 ring-slate-100 transition-all duration-300 hover:-translate-y-2 hover:shadow-2xl hover:shadow-blue-900/10 hover:ring-blue-50"
+                                        >
+                                            <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-gradient-to-br from-blue-50 to-indigo-50 opacity-0 transition-all duration-500 group-hover:opacity-100 group-hover:scale-150" />
 
-                                        <div className="relative flex flex-col items-center gap-5">
-                                            <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-[#002147] text-white shadow-lg shadow-blue-900/20 transition-transform duration-500 group-hover:scale-110 group-hover:rotate-3">
-                                                <CalendarDays className="h-7 w-7" />
-                                                <div className="absolute inset-0 rounded-2xl bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                            </div>
+                                            <div className="relative flex flex-col items-center gap-5">
+                                                <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-[#002147] text-white shadow-lg shadow-blue-900/20 transition-transform duration-500 group-hover:scale-110 group-hover:rotate-3">
+                                                    <CalendarDays className="h-7 w-7" />
+                                                    <div className="absolute inset-0 rounded-2xl bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                </div>
 
-                                            <div className="text-center space-y-1.5 z-10">
-                                                <h3 className="font-display text-lg font-bold text-slate-800 tracking-tight transition-colors group-hover:text-[#002147]">
-                                                    {className}
-                                                </h3>
-                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest group-hover:text-blue-500 transition-colors">
-                                                    View Calendar
-                                                </p>
+                                                <div className="text-center space-y-1.5 z-10">
+                                                    <h3 className="font-display text-lg font-bold text-slate-800 tracking-tight transition-colors group-hover:text-[#002147]">
+                                                        {className}
+                                                    </h3>
+                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest group-hover:text-blue-500 transition-colors">
+                                                        {hasCalendar ? 'View Calendar' : 'Not Published'}
+                                                    </p>
+                                                </div>
                                             </div>
-                                        </div>
-                                    </motion.div>
-                                ))}
+                                        </motion.div>
+                                    );
+                                })}
                             </div>
                         </motion.div>
                     ) : isAdminMode ? (
@@ -239,8 +245,10 @@ export default function AcademicCalendar() {
                                                     <SelectValue placeholder="Select Class" />
                                                 </SelectTrigger>
                                                 <SelectContent className="rounded-2xl border-slate-100 shadow-xl">
-                                                    {CLASSES.map(cls => (
-                                                        <SelectItem key={cls} value={cls} className="rounded-xl my-1">{cls}</SelectItem>
+                                                    {classes.map((cls) => (
+                                                        <SelectItem key={cls} value={cls}>
+                                                            {cls}
+                                                        </SelectItem>
                                                     ))}
                                                 </SelectContent>
                                             </Select>
@@ -397,18 +405,33 @@ export default function AcademicCalendar() {
                                                 </div>
                                                 <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest">School_Calendar_Vault_v1.2</p>
                                             </div>
-                                            <div className="flex-1 flex flex-col items-center justify-center space-y-8">
-                                                <div className="h-32 w-32 rounded-[2.5rem] bg-slate-50 flex items-center justify-center text-[#002147]/20 group-hover:scale-110 transition-transform duration-700">
-                                                    <CalendarDays className="h-16 w-16" />
-                                                </div>
-                                                <div className="text-center space-y-3 max-w-sm">
-                                                    <h3 className="text-2xl font-black text-[#002147] tracking-tight">Accessing Calendar...</h3>
-                                                    <p className="text-sm text-slate-400 leading-relaxed font-medium px-4">The academic calendar for {selectedClass} is being retrieved from the secure school portal. All holidays and exams are highlighted.</p>
-                                                </div>
-                                                <div className="flex gap-4">
-                                                    <Button variant="ghost" className="rounded-xl h-11 px-8 font-bold text-[#002147] hover:bg-slate-50">Zoom Out</Button>
-                                                    <Button className="bg-[#002147] text-white hover:bg-[#002147]/90 rounded-xl h-11 px-8 font-bold shadow-lg shadow-[#002147]/10">Launch Full View</Button>
-                                                </div>
+                                            <div className="flex-1 overflow-hidden rounded-b-[2rem]">
+                                                {(() => {
+                                                    const currentCalendar = existingCalendars.find(c => c.class_name === selectedClass);
+                                                    if (currentCalendar?.file_url) {
+                                                        const isImage = currentCalendar.file_type?.includes('image');
+                                                        return isImage ? (
+                                                            <img src={currentCalendar.file_url} alt="Academic Calendar" className="w-full h-full object-contain p-4" />
+                                                        ) : (
+                                                            <iframe
+                                                                src={`${currentCalendar.file_url}#toolbar=0`}
+                                                                className="w-full h-full min-h-[600px] border-none"
+                                                                title="Academic Calendar"
+                                                            />
+                                                        );
+                                                    }
+                                                    return (
+                                                        <div className="flex flex-col items-center justify-center h-full space-y-8 py-12">
+                                                            <div className="h-32 w-32 rounded-[2.5rem] bg-slate-50 flex items-center justify-center text-[#002147]/20 group-hover:scale-110 transition-transform duration-700">
+                                                                <CalendarDays className="h-16 w-16" />
+                                                            </div>
+                                                            <div className="text-center space-y-3 max-w-sm">
+                                                                <h3 className="text-2xl font-black text-[#002147] tracking-tight">No Calendar Published</h3>
+                                                                <p className="text-sm text-slate-400 leading-relaxed font-medium px-4">The academic calendar for {selectedClass} has not been uploaded yet. Please check back later.</p>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                         </div>
                                     </CardContent>

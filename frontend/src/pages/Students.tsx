@@ -12,7 +12,8 @@ import {
   Download,
   Trash2,
   AlertTriangle,
-  Plus
+  Plus,
+  Loader2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -73,10 +74,16 @@ export default function Students() {
   });
   const [selectedYear, setSelectedYear] = useState(academicYears[1]);
 
-  const classNames = [
-    'all', 'Nursery', 'LKG', 'UKG', 'Class 1', 'Class 2', 'Class 3', 'Class 4',
-    'Class 5', 'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10'
-  ];
+  const [classes, setClasses] = useState<ClassRow[]>([]);
+  useEffect(() => {
+    const fetchClasses = async () => {
+      const { data, error } = await supabase.from('classes').select('*').order('sort_order');
+      if (!error && data) setClasses(data as ClassRow[]);
+    };
+    fetchClasses();
+  }, []);
+
+  const classNames = ['all', ...classes.map(c => c.name)];
 
 
   const handleRemoveAllStudents = async () => {
@@ -282,7 +289,7 @@ export default function Students() {
         const studentType = (['old', 'new'].includes((r['studenttypeoldnew'] || r['studenttype'] || '').toLowerCase()))
           ? (r['studenttypeoldnew'] || r['studenttype']).toLowerCase() : 'new';
         const joiningDate = normalizeDate(r['dateofjoining'] || r['joiningdate']) || new Date().toISOString().split('T')[0];
-        const totalFees = parseFloat(r['totalfees'] || r['fees'] || '0') || 0;
+        const totalFees = parseFloat(r['totalfee'] || r['totalfees'] || r['fees'] || '0') || 0;
         const hasBooks = parseBooleanLike(r['booksyesno'] || r['books'] || r['hasbooks'] || 'no');
         const hasTransport = parseBooleanLike(r['transportyesno'] || r['transport'] || r['hastransport'] || 'no');
         const oldDues = parseFloat(r['olddues'] || '0') || 0;
@@ -389,7 +396,7 @@ export default function Students() {
             const rawType = (r['studenttypeoldnew'] || r['studenttype'] || 'new').toLowerCase();
             const studentType = ['old', 'new'].includes(rawType) ? rawType : 'new';
             const joiningDate = normalizeDate(r['dateofjoining'] || r['joiningdate']) || new Date().toISOString().split('T')[0];
-            const totalFees = parseFloat(r['totalfees'] || r['fees'] || '0') || 0;
+            const totalFees = parseFloat(r['totalfee'] || r['totalfees'] || r['fees'] || '0') || 0;
             const hasBooks = parseBooleanLike(r['booksyesno'] || r['books'] || r['hasbooks'] || 'no');
             const hasTransport = parseBooleanLike(r['transportyesno'] || r['transport'] || r['hastransport'] || 'no');
             const oldDues = parseFloat(r['olddues'] || '0') || 0;
@@ -578,7 +585,42 @@ export default function Students() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {/* Administrative buttons removed as requested */}
+            {isAdmin && (
+              <div className="flex flex-wrap items-center gap-3">
+                <input
+                  type="file"
+                  ref={bulkFileRef}
+                  className="hidden"
+                  accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+                  onChange={handleBulkUpload}
+                />
+                <Button
+                  variant="outline"
+                  onClick={() => bulkFileRef.current?.click()}
+                  disabled={isUploading}
+                  className="rounded-xl border-slate-200 h-11 px-6 font-bold text-slate-700 hover:bg-slate-50 transition-all hover:shadow-md active:scale-95"
+                >
+                  {isUploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2 text-blue-600" />}
+                  Bulk Upload CSV
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={downloadTemplate}
+                  className="rounded-xl border-slate-200 h-11 px-6 font-bold text-slate-700 hover:bg-slate-50 transition-all hover:shadow-md active:scale-95"
+                >
+                  <Download className="h-4 w-4 mr-2 text-emerald-600" />
+                  Template
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => setShowRemoveConfirm(true)}
+                  className="rounded-xl h-11 px-6 font-bold shadow-lg shadow-red-500/10 hover:shadow-red-500/20 transition-all active:scale-95"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Wipe All
+                </Button>
+              </div>
+            )}
 
             <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-full text-sm font-medium">
               <School className="h-4 w-4" />

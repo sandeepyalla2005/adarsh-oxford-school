@@ -33,7 +33,8 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<{ error: Error | null }>;
 }
 
-const ROLE_FETCH_TIMEOUT = 15000; // Increased to 15s to handle slow cold starts
+const ROLE_FETCH_TIMEOUT = 5000; // Reduced to 5s for faster feedback
+const ROLE_CACHE_KEY_PREFIX = 'user_role_';
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -64,7 +65,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Optimized fetch with safety timeout (default 15s)
+  const getCachedRole = (userId: string): UserRole => {
+    try {
+      const cached = localStorage.getItem(`${ROLE_CACHE_KEY_PREFIX}${userId}`);
+      if (cached) return cached as UserRole;
+    } catch (e) {}
+    return null;
+  };
+
+  const setCachedRole = (userId: string, role: UserRole) => {
+    try {
+      if (role) {
+        localStorage.setItem(`${ROLE_CACHE_KEY_PREFIX}${userId}`, role);
+      } else {
+        localStorage.removeItem(`${ROLE_CACHE_KEY_PREFIX}${userId}`);
+      }
+    } catch (e) {}
+  };
+
+  // Optimized fetch with safety timeout (default 5s)
   const fetchUserRoleWithTimeout = async (userId: string, timeoutMs = ROLE_FETCH_TIMEOUT): Promise<UserRole> => {
     console.log('Fetching role for ID:', userId);
 
@@ -82,6 +101,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           p_user_id: userId
         });
 
+        let resolvedRole: UserRole = null;
+
         if (error) {
           console.error('RPC Role Error:', error);
           // Fallback to direct table query
@@ -92,29 +113,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
           if (tableError) {
             console.error('Table Fallback Error:', tableError);
-            return null;
+          } else {
+            const roles = (tableData || []).map((r: any) => r.role as string);
+            console.log('Fallback Roles Found:', roles);
+            if (roles.includes('admin')) resolvedRole = 'admin';
+            else if (roles.includes('feeInCharge')) resolvedRole = 'feeInCharge';
+            else if (roles.includes('staff')) resolvedRole = 'staff';
           }
+        } else {
+          const rolesList = (data as any[] || []).map((r: any) =>
+            (typeof r === 'string' ? r : (r.role || r)) as string
+          );
 
-          const roles = (tableData || []).map((r: any) => r.role as string);
-          console.log('Fallback Roles Found:', roles);
-          if (roles.includes('admin')) return 'admin';
-          if (roles.includes('feeInCharge')) return 'feeInCharge';
-          if (roles.includes('staff')) return 'staff';
-          return null;
+          console.log('RPC Roles Found:', rolesList);
+          if (rolesList.includes('admin')) resolvedRole = 'admin';
+          else if (rolesList.includes('feeInCharge')) resolvedRole = 'feeInCharge';
+          else if (rolesList.includes('staff')) resolvedRole = 'staff';
         }
 
-        const rolesList = (data as any[] || []).map((r: any) =>
-          (typeof r === 'string' ? r : (r.role || r)) as string
-        );
-
-        console.log('RPC Roles Found:', rolesList);
-        if (rolesList.includes('admin')) return 'admin';
-        
-        // Check for feeInCharge directly OR via staff + designation promotion
-        if (rolesList.includes('feeInCharge')) return 'feeInCharge';
-        
-        if (rolesList.includes('staff')) {
-          // If we find staff, check if we should promote to feeInCharge
+        // If we found a role and it's staff, check for designation promotion
+        if (resolvedRole === 'staff') {
           const { data: profileData } = await supabase
             .from('profiles')
             .select('designation')
@@ -123,11 +141,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           if (profileData?.designation === 'Fee In-Charge') {
             console.log('Promoting Staff to feeInCharge based on designation');
-            return 'feeInCharge';
+            resolvedRole = 'feeInCharge';
           }
-          return 'staff';
         }
-        return null;
+
+        if (resolvedRole) {
+          setCachedRole(userId, resolvedRole);
+        }
+        return resolvedRole;
       } catch (err) {
         console.error('Critical Role Fetch Failure:', err);
         return null;
@@ -163,20 +184,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.log('✅ Found existing session for:', existingSession.user.email);
           setSession(existingSession);
           setUser(existingSession.user);
-          // Parallelize profile and role fetching for speed
+
+          // 1. Try to recover role from cache for instant load
+          const cachedRole = getCachedRole(existingSession.user.id);
+          if (cachedRole) {
+            console.log('⚡ Recovered role from cache:', cachedRole);
+            setUserRole(cachedRole);
+            setIsLoading(false); // Stop loading immediately if we have a cached role
+          }
+
+          // 2. Fetch fresh profile and role in background (or foreground if no cache)
           const [role, foundProfile] = await Promise.all([
             fetchUserRoleWithTimeout(existingSession.user.id),
             fetchProfile(existingSession.user.id)
           ]);
 
           try {
-              // Use the profile we just fetched instead of stale state
-              const finalRole = (role === 'staff' && foundProfile?.designation === 'Fee In-Charge') ? 'feeInCharge' : (role || 'staff');
-              console.log('Final resolved role:', finalRole);
-              setUserRole(finalRole);
+            const finalRole = (role === 'staff' && foundProfile?.designation === 'Fee In-Charge') ? 'feeInCharge' : (role || cachedRole || 'staff');
+            console.log('Final resolved role:', finalRole);
+            setUserRole(finalRole);
+            setCachedRole(existingSession.user.id, finalRole);
           } catch (err) {
             console.error('Role resolution failed:', err);
-            setUserRole('staff'); // Safe fallback instead of getting stuck on null
+            if (!cachedRole) setUserRole('staff');
           } finally {
             setIsLoading(false);
           }
