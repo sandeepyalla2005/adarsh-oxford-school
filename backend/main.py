@@ -89,14 +89,16 @@ app.add_middleware(
 )
 
 # Supabase configuration
-url: str = os.environ.get("VITE_SUPABASE_URL")
-key: str = os.environ.get("VITE_SUPABASE_PUBLISHABLE_KEY")
-service_key: str = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+url: str = os.environ.get("VITE_SUPABASE_URL") or os.environ.get("SUPABASE_URL")
+key: str = os.environ.get("VITE_SUPABASE_PUBLISHABLE_KEY") or os.environ.get("SUPABASE_KEY")
+service_key: str = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "") or os.environ.get("SERVICE_ROLE_KEY", "")
 
 if not url or not key:
-    raise RuntimeError("VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY must be set")
+    logger.error(f"Missing Supabase config! URL: {'set' if url else 'MISSING'}, KEY: {'set' if key else 'MISSING'}")
+    raise RuntimeError("Supabase credentials must be set in environment variables.")
 
 try:
+    logger.info(f"Initializing Supabase client for: {url}")
     supabase: Client = create_client(url, key)
     admin_supabase: Client | None = create_client(url, service_key) if service_key else None
 except Exception as e:
