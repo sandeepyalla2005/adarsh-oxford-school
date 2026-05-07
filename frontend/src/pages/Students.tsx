@@ -66,6 +66,13 @@ export default function Students() {
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const bulkFileRef = useRef<HTMLInputElement>(null);
 
+  const currentYear = new Date().getFullYear();
+  const academicYears = Array.from({ length: 2040 - currentYear + 5 }, (_, i) => {
+    const startYear = currentYear - 1 + i;
+    return `${startYear}-${(startYear + 1).toString().slice(-2)}`;
+  });
+  const [selectedYear, setSelectedYear] = useState(academicYears[1]);
+
   const classNames = [
     'all', 'Nursery', 'LKG', 'UKG', 'Class 1', 'Class 2', 'Class 3', 'Class 4',
     'Class 5', 'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10'
@@ -616,7 +623,7 @@ export default function Students() {
                 </h3>
                 <div className="flex items-center justify-center gap-2">
                   <span className="bg-white/20 px-3 py-1 rounded-full text-xs font-bold tracking-wider text-blue-50 backdrop-blur-md">
-                    {students.length} TOTAL
+                    {classCounts['all'] || 0} TOTAL
                   </span>
                 </div>
               </div>
@@ -671,7 +678,7 @@ export default function Students() {
               </div>
               <h2 className="text-2xl font-bold text-slate-800">Remove All Students?</h2>
               <p className="text-slate-500 text-sm">
-                This will permanently delete <span className="font-bold text-red-600">{students.length} student records</span> from the database.
+                This will permanently delete <span className="font-bold text-red-600">{classCounts['all'] || 0} student records</span> from the database.
                 This action <span className="font-bold">cannot be undone</span>.
               </p>
               <div className="flex gap-3 w-full mt-2">
