@@ -21,7 +21,8 @@ import {
   FileText,
   Users,
   Shirt,
-  IdCard
+  IdCard,
+  UserPlus
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
@@ -148,30 +149,26 @@ export default function AccessoriesFees() {
     try {
       setIsLoading(true);
       
-      // 1. Fetch Categories from FastAPI
+      // Fetch categories first as others might depend on it (or just fetch all together)
       const catResp = await apiFetch('/api/accessories/categories');
-      if (!catResp.ok) throw new Error('Failed to fetch categories from Backend');
-      const catsList = await catResp.json();
-      setCategories(catsList);
+      if (!catResp.ok) throw new Error('Failed to load categories');
+      const categoriesData = await catResp.json();
+      setCategories(categoriesData);
 
-      // 2. Fetch Students
-      const { data: studentsData } = await supabase
-        .from('students')
-        .select('id, full_name, class_id, father_phone, mother_phone, classes(name)')
-        .eq('is_active', true)
-        .order('full_name');
+      // Fetch students, assignments, and payments in PARALLEL
+      const [studentsRes, assignmentsRes, paymentsRes] = await Promise.all([
+        supabase.from('students').select('id, full_name, class_id, father_phone, mother_phone, classes(name, sort_order)').eq('is_active', true),
+        supabase.from('student_accessory_fees').select('*').eq('academic_year', academicYear),
+        supabase.from('student_accessory_payments').select('student_id, category_id, amount_paid').eq('academic_year', academicYear)
+      ]);
 
-      // 3. Fetch Assignments (student_accessory_fees)
-      const { data: assignmentsData } = await supabase
-        .from('student_accessory_fees')
-        .select('*')
-        .eq('academic_year', academicYear);
-        
-      // 4. Fetch Payments (student_accessory_payments)
-      const { data: paymentsData } = await supabase
-        .from('student_accessory_payments')
-        .select('*')
-        .eq('academic_year', academicYear);
+      if (studentsRes.error) throw studentsRes.error;
+      if (assignmentsRes.error) throw assignmentsRes.error;
+      if (paymentsRes.error) throw paymentsRes.error;
+
+      const studentsData = studentsRes.data || [];
+      const assignmentsData = assignmentsRes.data || [];
+      const paymentsData = paymentsRes.data || [];
 
       // Process Data
       const enrichedStudents: StudentAccessoriesData[] = (studentsData as any[] || []).map(student => {
@@ -181,7 +178,7 @@ export default function AccessoriesFees() {
         const studentPayments = (paymentsData as any[] || []).filter(p => p.student_id === student.id);
         
         const assignedCategories: AssignedCategory[] = studentAssignments.map(assign => {
-            const catName = catsList.find(c => c.id === assign.category_id)?.name || 'Unknown';
+            const catName = categoriesData.find((c: any) => c.id === assign.category_id)?.name || 'Unknown';
             const categoryPayments = studentPayments.filter(p => p.category_id === assign.category_id);
             const totalPaidForCat = categoryPayments.reduce((sum, p) => sum + Number(p.amount_paid), 0);
             const pending = Math.max(0, Number(assign.fee_amount) - totalPaidForCat);
@@ -206,6 +203,14 @@ export default function AccessoriesFees() {
           totalPaid,
           totalPending,
         };
+      });
+
+      // Sort class-wise then by name
+      enrichedStudents.sort((a, b) => {
+        const orderA = (a as any).classes?.sort_order || 0;
+        const orderB = (b as any).classes?.sort_order || 0;
+        if (orderA !== orderB) return orderA - orderB;
+        return a.full_name.localeCompare(b.full_name);
       });
 
       setStudents(enrichedStudents);
@@ -370,13 +375,12 @@ export default function AccessoriesFees() {
 
   const filteredStudents = students.filter((student) => {
     const matchesSearch = student.full_name.toLowerCase().includes(searchQuery.toLowerCase());
-    const className = student.classes?.name || '';
-    const matchesClass = selectedClass === 'all' || className === selectedClass;
+    const matchesClass = selectedClass === 'all' || student.class_id === selectedClass;
     
     let matchesCategory = true;
     if (selectedCategoryTab !== 'all') {
       matchesCategory = student.assignedCategories.some(cat => 
-        cat.name.toLowerCase().includes(selectedCategoryTab.toLowerCase())
+        cat.category_id === selectedCategoryTab
       );
     }
     
@@ -420,10 +424,16 @@ export default function AccessoriesFees() {
         >
           {[
             { id: 'all', label: 'All Students', icon: Users },
-            { id: 'Uniform', label: 'Uniforms', icon: Shirt },
-            { id: 'ID Card', label: 'ID Cards & Belts', icon: IdCard },
-            { id: 'Field Trip', label: 'Field Trips', icon: Bus },
-            { id: 'Exam Pad', label: 'Exam Pads', icon: BookOpen }
+            ...categories.map(cat => ({
+              id: cat.id,
+              label: cat.name,
+              icon: cat.name.toLowerCase().includes('uniform') ? Shirt :
+                    cat.name.toLowerCase().includes('id') ? IdCard :
+                    cat.name.toLowerCase().includes('bus') || cat.name.toLowerCase().includes('trip') ? Bus :
+                    cat.name.toLowerCase().includes('book') || cat.name.toLowerCase().includes('pad') ? BookOpen :
+                    cat.name.toLowerCase().includes('admission') ? UserPlus :
+                    ShoppingBag
+            }))
           ].map((tab) => (
             <Button
               key={tab.id}
@@ -446,6 +456,19 @@ export default function AccessoriesFees() {
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input placeholder="Search by student name..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
           </div>
+          <Select value={selectedClass} onValueChange={setSelectedClass}>
+            <SelectTrigger className="w-full sm:w-48">
+              <SelectValue placeholder="All Classes" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Classes</SelectItem>
+              {classes.map((cls) => (
+                <SelectItem key={cls.id} value={cls.id}>
+                  {cls.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
@@ -462,6 +485,7 @@ export default function AccessoriesFees() {
                   <TableHeader>
                     <TableRow className="table-header">
                       <TableHead>Student Name</TableHead>
+                      <TableHead>Class</TableHead>
                       <TableHead>Parent Phones</TableHead>
                       <TableHead>Assigned Categories</TableHead>
                       <TableHead className="text-right">Total Fee</TableHead>
@@ -480,7 +504,11 @@ export default function AccessoriesFees() {
                         <TableRow key={student.id} className="hover:bg-muted/50">
                           <TableCell className="font-medium">
                               {student.full_name}
-                              <div className="text-xs text-muted-foreground font-normal mt-1"><Badge variant="secondary" className="text-[10px] scale-90 -ml-2">{student.classes?.name}</Badge></div>
+                          </TableCell>
+                          <TableCell>
+                              <Badge variant="secondary" className="bg-slate-100 text-slate-700 hover:bg-slate-200">
+                                {student.classes?.name}
+                              </Badge>
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
@@ -577,7 +605,7 @@ export default function AccessoriesFees() {
               <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
                   {categories.map(cat => {
                       const isSelected = assignmentSelections[cat.id]?.selected || false;
-                      const fee = assignmentSelections[cat.id]?.fee || cat.default_price;
+                      const fee = assignmentSelections[cat.id]?.fee ?? cat.default_price;
                       
                       return (
                           <div key={cat.id} className={`flex items-center gap-4 p-4 rounded-xl border transition-colors ${isSelected ? 'border-primary/50 bg-primary/5' : 'border-slate-100 bg-white'}`}>
@@ -592,12 +620,15 @@ export default function AccessoriesFees() {
                               </div>
                               <div className="w-[120px]">
                                   <div className="relative">
-                                      <IndianRupee className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">₹</span>
                                       <Input 
                                           type="number" 
-                                          className="pl-7 h-9" 
-                                          value={fee} 
-                                          onChange={(e) => setAssignmentSelections(p => ({...p, [cat.id]: { ...p[cat.id], fee: Number(e.target.value) }}))}
+                                          className="pl-7 h-10 font-semibold" 
+                                          value={fee ?? 0} 
+                                          onChange={(e) => {
+                                              const val = e.target.value === '' ? 0 : Number(e.target.value);
+                                              setAssignmentSelections(p => ({...p, [cat.id]: { ...p[cat.id], fee: val }}));
+                                          }}
                                           disabled={!isSelected}
                                       />
                                   </div>

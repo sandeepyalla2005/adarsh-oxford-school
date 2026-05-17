@@ -46,7 +46,7 @@ type ClassRow = {
 
 export default function Students() {
   const { user, profile, userRole, isAdmin } = useAuth();
-  const isFeeAdmin = isAdmin; // Only admin can manage students
+  const isFeeAdmin = isAdmin || userRole === 'feeInCharge'; // Allow both admin and fee in-charge to manage students
   const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
@@ -65,6 +65,9 @@ export default function Students() {
   const [isUploading, setIsUploading] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+  const [showOtpInput, setShowOtpInput] = useState(false);
+  const [wipeOtp, setWipeOtp] = useState('');
+  const [isRequestingOtp, setIsRequestingOtp] = useState(false);
   const bulkFileRef = useRef<HTMLInputElement>(null);
 
   const currentYear = new Date().getFullYear();
@@ -86,28 +89,60 @@ export default function Students() {
   const classNames = ['all', ...classes.map(c => c.name)];
 
 
-  const handleRemoveAllStudents = async () => {
-    setIsRemoving(true);
-    setShowRemoveConfirm(false);
+  const handleRequestWipeOtp = async () => {
+    setIsRequestingOtp(true);
     try {
-      const { error } = await supabase.from('students').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      if (error) throw error;
+      const resp = await apiFetch('/api/auth/request-wipe', { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ operation: 'students' })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || 'Failed to request OTP');
+      setShowOtpInput(true);
+      toast({ title: '🔐 OTP Sent', description: data.message || 'Please get the 6-digit verification code.' });
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'OTP Error', description: err.message });
+    } finally {
+      setIsRequestingOtp(false);
+    }
+  };
 
-      // Log the mass deletion
+  const handleRemoveAllStudents = async () => {
+    if (!wipeOtp || wipeOtp.length !== 6) {
+      toast({ variant: 'destructive', title: 'Invalid OTP', description: 'Please enter the 6-digit code from Admin.' });
+      return;
+    }
+
+    setIsRemoving(true);
+    try {
+      const resp = await apiFetch('/api/students/wipe-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ otp: wipeOtp })
+      });
+
+      if (!resp.ok) {
+        const data = await resp.json();
+        throw new Error(data.detail || 'Wipe failed');
+      }
+
+      // Log the mass deletion (frontend side as well)
       await logStudentAction({
         studentName: 'All Students',
         actionType: 'DELETE',
         moduleName: 'Student Info',
-        oldValues: { detail: 'Mass removal of all student records' },
+        oldValues: { detail: 'Mass removal of all student records via OTP confirmation' },
         performedBy: user?.id || '',
         performedByName: profile?.full_name || 'Admin',
         role: userRole || 'admin'
       });
 
-      // Force clear backend cache
-      await apiFetch('/api/students/clear-cache', { method: 'POST' });
+      toast({ title: '🗑️ All Students Removed', description: 'The database has been wiped successfully.' });
+      setShowRemoveConfirm(false);
+      setShowOtpInput(false);
+      setWipeOtp('');
       
-      toast({ title: '🗑️ All Students Removed', description: 'All student records have been deleted successfully.' });
       queryClient.invalidateQueries({ queryKey: ['student-counts'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
     } catch (err: any) {
@@ -593,7 +628,7 @@ export default function Students() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {isAdmin && (
+            {isFeeAdmin && (
               <div className="flex flex-wrap items-center gap-3">
                 <input
                   type="file"
@@ -681,7 +716,7 @@ export default function Students() {
           </motion.div>
 
           {/* Class Cards */}
-          {classNames.filter(c => c !== 'all').map((className, index) => (
+          {classNames.filter(c => c !== 'all' && c.toUpperCase() !== 'DELETED').map((className, index) => (
             <motion.div
               key={className}
               initial={{ opacity: 0, y: 20 }}
@@ -729,24 +764,59 @@ export default function Students() {
               <h2 className="text-2xl font-bold text-slate-800">Remove All Students?</h2>
               <p className="text-slate-500 text-sm">
                 This will permanently delete <span className="font-bold text-red-600">{classCounts['all'] || 0} student records</span> from the database.
-                This action <span className="font-bold">cannot be undone</span>.
+                This action <span className="font-bold">requires Admin OTP confirmation</span>.
               </p>
-              <div className="flex gap-3 w-full mt-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setShowRemoveConfirm(false)}
-                  className="flex-1 rounded-xl"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleRemoveAllStudents}
-                  className="flex-1 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold"
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Yes, Remove All
-                </Button>
-              </div>
+
+              {showOtpInput ? (
+                <div className="w-full space-y-4 mt-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-widest text-left block">
+                      Verification Code
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      value={wipeOtp}
+                      onChange={(e) => setWipeOtp(e.target.value.replace(/\D/g, ''))}
+                      placeholder="Enter 6-digit OTP"
+                      className="w-full h-12 rounded-xl border-2 border-slate-100 bg-slate-50 px-4 text-center text-2xl font-black tracking-[0.5em] text-[#002147] focus:border-red-200 focus:outline-none transition-all"
+                    />
+                  </div>
+                  <div className="flex gap-3 w-full">
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowOtpInput(false)}
+                      className="flex-1 rounded-xl"
+                    >
+                      Back
+                    </Button>
+                    <Button
+                      onClick={handleRemoveAllStudents}
+                      disabled={isRemoving || wipeOtp.length !== 6}
+                      className="flex-1 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold"
+                    >
+                      {isRemoving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirm Wipe"}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex gap-3 w-full mt-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowRemoveConfirm(false)}
+                    className="flex-1 rounded-xl"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleRequestWipeOtp}
+                    disabled={isRequestingOtp}
+                    className="flex-1 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold"
+                  >
+                    {isRequestingOtp ? <Loader2 className="h-4 w-4 animate-spin" /> : "Get OTP to Wipe"}
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -6,7 +6,9 @@ import {
   Search,
   Phone,
   Printer,
-
+  Download,
+  FileText,
+  FileSpreadsheet,
   BookOpen,
   Bus,
   ShoppingCart,
@@ -60,6 +62,8 @@ export default function PendingFees() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedClass, setSelectedClass] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 50;
 
   const academicYear = getCurrentAcademicYear();
 
@@ -82,9 +86,9 @@ export default function PendingFees() {
   const fetchPendingData = async () => {
     setIsLoading(true);
     try {
-      let selectClause = 'id, full_name, class_id, father_phone, mother_phone, term1_fee, term2_fee, term3_fee, old_dues, has_books, books_fee, has_transport, transport_fee, has_accessories, accessories_fee, classes(name)';
+      let selectClause = 'id, admission_number, full_name, class_id, father_name, father_phone, mother_phone, term1_fee, term2_fee, term3_fee, old_dues, has_books, books_fee, has_transport, transport_fee, classes(name, sort_order)';
       if (selectedClass !== 'all') {
-        selectClause = 'id, full_name, class_id, father_phone, mother_phone, term1_fee, term2_fee, term3_fee, old_dues, has_books, books_fee, has_transport, transport_fee, has_accessories, accessories_fee, classes!inner(name)';
+        selectClause = 'id, admission_number, full_name, class_id, father_name, father_phone, mother_phone, term1_fee, term2_fee, term3_fee, old_dues, has_books, books_fee, has_transport, transport_fee, classes!inner(name, sort_order)';
       }
 
       let query = supabase
@@ -101,19 +105,19 @@ export default function PendingFees() {
       const [coursePaymentsRes, booksPaymentsRes, transportPaymentsRes, accessoriesPaymentsRes] = await Promise.all([
         supabase
           .from('course_payments')
-          .select('student_id, term, amount_paid')
+          .select('student_id, term, amount_paid, payment_date')
           .eq('academic_year', academicYear),
         supabase
           .from('books_payments')
-          .select('student_id, amount_paid')
+          .select('student_id, amount_paid, payment_date')
           .eq('academic_year', academicYear),
         supabase
           .from('transport_payments')
-          .select('student_id, month')
+          .select('student_id, month, payment_date')
           .eq('academic_year', academicYear),
         supabase
           .from('student_accessory_payments')
-          .select('student_id, amount_paid')
+          .select('student_id, amount_paid, payment_date')
           .eq('academic_year', academicYear),
       ]);
 
@@ -122,13 +126,14 @@ export default function PendingFees() {
       const transportPayments = (transportPaymentsRes.data || []) as any[];
       const accessoriesPayments = (accessoriesPaymentsRes.data || []) as any[];
 
-      const coursePaymentMap = new Map<string, { term1: number; term2: number; term3: number }>();
+      const coursePaymentMap = new Map<string, { term1: number; term2: number; term3: number; oldDues: number }>();
       coursePayments.forEach(p => {
         const studentId = p.student_id as string;
-        const existing = coursePaymentMap.get(studentId) || { term1: 0, term2: 0, term3: 0 };
+        const existing = coursePaymentMap.get(studentId) || { term1: 0, term2: 0, term3: 0, oldDues: 0 };
         if (p.term === 1) existing.term1 += Number(p.amount_paid);
         if (p.term === 2) existing.term2 += Number(p.amount_paid);
         if (p.term === 3) existing.term3 += Number(p.amount_paid);
+        if (p.term === 0) existing.oldDues += Number(p.amount_paid);
         coursePaymentMap.set(studentId, existing);
       });
 
@@ -154,16 +159,32 @@ export default function PendingFees() {
         accessoriesPaymentMap.set(studentId, existing + Number(p.amount_paid));
       });
 
+      const lastPaymentMap = new Map<string, Date>();
+      const updateLastPayment = (studentId: string, dateStr: string) => {
+        if (!dateStr) return;
+        const date = new Date(dateStr);
+        const existing = lastPaymentMap.get(studentId);
+        if (!existing || date > existing) {
+          lastPaymentMap.set(studentId, date);
+        }
+      };
+
+      coursePayments.forEach(p => updateLastPayment(p.student_id, p.payment_date));
+      booksPayments.forEach(p => updateLastPayment(p.student_id, p.payment_date));
+      transportPayments.forEach(p => updateLastPayment(p.student_id, p.payment_date));
+      accessoriesPayments.forEach(p => updateLastPayment(p.student_id, p.payment_date));
+
       const currentMonth = new Date().getMonth() + 1;
 
       const enriched = (studentsData as any[] || []).map(student => {
         const studentId = student.id as string;
-        const paid = coursePaymentMap.get(studentId) || { term1: 0, term2: 0, term3: 0 };
+        const paid = coursePaymentMap.get(studentId) || { term1: 0, term2: 0, term3: 0, oldDues: 0 };
         const term1Pending = Math.max(0, (student.term1_fee || 0) - paid.term1);
         const term2Pending = Math.max(0, (student.term2_fee || 0) - paid.term2);
         const term3Pending = Math.max(0, (student.term3_fee || 0) - paid.term3);
         const oldDues = Number(student.old_dues) || 0;
-        const coursePending = term1Pending + term2Pending + term3Pending + oldDues;
+        const oldDuesPending = Math.max(0, oldDues - paid.oldDues);
+        const coursePending = term1Pending + term2Pending + term3Pending + oldDuesPending;
 
         const booksPaid = booksPaymentMap.get(student.id) || 0;
         const booksPending = student.has_books ? Math.max(0, (student.books_fee || 0) - booksPaid) : 0;
@@ -178,20 +199,33 @@ export default function PendingFees() {
         const accessoriesPending = student.has_accessories ? Math.max(0, (student.accessories_fee || 0) - accessoriesPaid) : 0;
 
         const totalPending = coursePending + booksPending + transportPending + accessoriesPending;
+        const termFeePending = term1Pending + term2Pending + term3Pending;
+        const lastPayment = lastPaymentMap.get(studentId);
 
         return {
           ...student,
           term1Pending,
           term2Pending,
           term3Pending,
+          termFeePending,
+          oldDuesPending,
           coursePending,
           booksPending,
           transportPending,
           accessoriesPending,
           pendingMonths,
           totalPending,
+          lastPaymentDate: lastPayment ? lastPayment.toISOString() : null,
         };
       }).filter(s => s.totalPending > 0);
+
+      // Sort by class order then by name
+      enriched.sort((a, b) => {
+        const orderA = a.classes?.sort_order || 0;
+        const orderB = b.classes?.sort_order || 0;
+        if (orderA !== orderB) return orderA - orderB;
+        return a.full_name.localeCompare(b.full_name);
+      });
 
       setStudents(enriched);
 
@@ -255,26 +289,98 @@ export default function PendingFees() {
     return matchesSearch && matchesClass && matchesCategory;
   });
 
+  const totalPages = Math.ceil(filteredStudents.length / itemsPerPage);
+  const paginatedStudents = filteredStudents.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   const totalPending = filteredStudents.reduce((sum, s) =>
     sum + (s.totalPending || 0), 0
   );
 
+  const [isPrinting, setIsPrinting] = useState(false);
+
+  const handlePrint = () => {
+    setIsPrinting(true);
+    setTimeout(() => {
+      window.print();
+      setIsPrinting(false);
+    }, 100);
+  };
+
+  const handleExportCSV = () => {
+    const headers = ['Student Name', 'Admission No', 'Class', 'Parent Name', 'Parent Mobile', 'Term Fee Pending', 'Old Due', 'Transport Pending', 'Books Pending', 'Total Pending', 'Last Payment', 'Status'];
+    const csvContent = [
+      headers.join(','),
+      ...filteredStudents.map(s => [
+        `"${s.full_name}"`,
+        `"${s.admission_number || ''}"`,
+        `"${s.classes?.name || ''}"`,
+        `"${s.father_name || ''}"`,
+        `"${s.father_phone || s.mother_phone || ''}"`,
+        s.termFeePending || 0,
+        s.oldDuesPending || 0,
+        s.transportPending || 0,
+        s.booksPending || 0,
+        s.totalPending || 0,
+        s.lastPaymentDate ? new Date(s.lastPaymentDate).toLocaleDateString() : '',
+        s.lastPaymentDate ? 'Partial Paid' : 'Pending'
+      ].join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `pending_fees_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <DashboardLayout>
-      <div className="space-y-8">
+      {/* Print Only Header */}
+      <div className="hidden print:flex flex-col items-center border-b-2 border-slate-900 pb-4 mb-6 relative w-full">
+          <div className="flex flex-col text-center">
+              <h1 className="text-xl md:text-3xl font-black text-[#002147] tracking-tight uppercase font-serif">ADARSH OXFORD</h1>
+              <p className="text-[10px] md:text-sm font-bold text-slate-600 uppercase tracking-[0.2em] -mt-1">English Medium School</p>
+          </div>
+          <div className="mt-4">
+              <span className="border-b-2 border-slate-900 text-lg md:text-xl font-bold uppercase tracking-widest px-2">Pending Fees Report</span>
+          </div>
+          {selectedClass !== 'all' && (
+             <div className="mt-2 text-sm font-semibold">Class: {classes.find(c => c.id === selectedClass)?.name}</div>
+          )}
+      </div>
+
+      <div className="space-y-8 print:space-y-4 print:p-0">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+          className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between print:hidden"
         >
           <div className="page-header mb-0">
             <h1 className="page-title">Pending Fees</h1>
             <p className="page-description">View and manage pending fee collections</p>
           </div>
-          <Button variant="outline">
-            <Printer className="mr-2 h-4 w-4" />
-            Print Report
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" onClick={handlePrint} size="sm">
+              <Printer className="mr-2 h-4 w-4" />
+              Print All
+            </Button>
+            <Button variant="outline" onClick={handlePrint} size="sm">
+              <Printer className="mr-2 h-4 w-4" />
+              Print Class Wise
+            </Button>
+            <Button variant="outline" onClick={handlePrint} size="sm">
+              <FileText className="mr-2 h-4 w-4" />
+              Export PDF
+            </Button>
+            <Button variant="outline" onClick={handleExportCSV} size="sm">
+              <Download className="mr-2 h-4 w-4" />
+              Export Excel
+            </Button>
+          </div>
         </motion.div>
 
 
@@ -285,14 +391,14 @@ export default function PendingFees() {
           transition={{ delay: 0.2 }}
         >
           <Tabs value={filterPeriod} onValueChange={setFilterPeriod}>
-            <TabsList>
+            <TabsList className="print:hidden">
               <TabsTrigger value="monthly">Monthly View</TabsTrigger>
               <TabsTrigger value="yearly">Yearly View</TabsTrigger>
             </TabsList>
 
             <TabsContent value="monthly" className="mt-4">
               {/* Summary Cards Row */}
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 mb-6">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 mb-6 print:hidden">
                 {/* Total Pending Card */}
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
@@ -404,7 +510,7 @@ export default function PendingFees() {
               </div>
 
               {/* Filter Row */}
-              <div className="flex flex-col gap-4 sm:flex-row mb-6">
+              <div className="flex flex-col gap-4 sm:flex-row mb-6 print:hidden">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -432,7 +538,10 @@ export default function PendingFees() {
               {/* Table Section */}
               <Card className="card-elevated">
                 <CardHeader>
-                  <CardTitle className="font-display">Pending Fees Overview</CardTitle>
+                  <CardTitle className="font-display flex items-center gap-3 print:hidden">
+                    Pending Fees Overview
+                    <Badge variant="outline" className="text-destructive border-destructive">{filteredStudents.length} Students Pending</Badge>
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
                   <div className="overflow-x-auto">
@@ -440,67 +549,52 @@ export default function PendingFees() {
                       <TableHeader>
                         <TableRow className="table-header">
                           <TableHead>Student Name</TableHead>
+                          <TableHead>Adm No.</TableHead>
                           <TableHead>Class</TableHead>
-                          <TableHead className="text-right">Course Pending</TableHead>
-                          <TableHead className="text-right">Books Pending</TableHead>
-                          <TableHead className="text-right">Transport Pending</TableHead>
-                          <TableHead className="text-right">Acc Pending</TableHead>
+                          <TableHead>Parent Name</TableHead>
+                          <TableHead>Parent Mobile</TableHead>
+                          <TableHead className="text-right">Term 1</TableHead>
+                          <TableHead className="text-right">Term 2</TableHead>
+                          <TableHead className="text-right">Term 3</TableHead>
+                          <TableHead className="text-right">Old Due</TableHead>
+                          <TableHead className="text-right">Transport</TableHead>
+                          <TableHead className="text-right">Books</TableHead>
                           <TableHead className="text-right">Total Pending</TableHead>
-                          <TableHead>Parent Numbers</TableHead>
+                          <TableHead>Last Payment</TableHead>
+                          <TableHead>Status</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {isLoading ? (
                           <TableRow>
-                            <TableCell colSpan={7} className="text-center py-12">
+                            <TableCell colSpan={14} className="text-center py-12">
                               <div className="h-8 w-8 mx-auto animate-spin rounded-full border-4 border-primary border-t-transparent" />
                             </TableCell>
                           </TableRow>
                         ) : filteredStudents.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
+                            <TableCell colSpan={14} className="text-center py-12 text-muted-foreground">
                               No pending fees found
                             </TableCell>
                           </TableRow>
                         ) : (
-                          filteredStudents.map((student) => (
+                          (isPrinting ? filteredStudents : paginatedStudents).map((student) => (
                             <TableRow key={student.id} className="hover:bg-muted/50">
                               <TableCell className="font-medium">{student.full_name}</TableCell>
+                              <TableCell className="font-mono text-sm">{student.admission_number || 'N/A'}</TableCell>
                               <TableCell>
                                 <Badge variant="secondary">{student.classes?.name}</Badge>
                               </TableCell>
-                              <TableCell className="text-right">
-                                <span className="font-semibold text-primary">
-                                  {formatCurrency(student.coursePending || 0)}
-                                </span>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <span className="font-semibold text-secondary">
-                                  {formatCurrency(student.booksPending || 0)}
-                                </span>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <span className="font-semibold text-success">
-                                  {formatCurrency(student.transportPending || 0)}
-                                </span>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <span className="font-semibold text-info">
-                                  {formatCurrency(student.accessoriesPending || 0)}
-                                </span>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <span className="font-semibold text-destructive">
-                                  {formatCurrency((student.coursePending || 0) + (student.booksPending || 0) + (student.transportPending || 0))}
-                                </span>
-                              </TableCell>
+                              <TableCell>{student.father_name || 'N/A'}</TableCell>
                               <TableCell>
                                 <div className="flex flex-col gap-1 text-sm text-muted-foreground">
-                                  <div className="flex items-center gap-1">
-                                    <Phone className="h-3 w-3" />
-                                    {student.father_phone}
-                                  </div>
-                                  {student.mother_phone && (
+                                  {student.father_phone && (
+                                    <div className="flex items-center gap-1">
+                                      <Phone className="h-3 w-3" />
+                                      {student.father_phone}
+                                    </div>
+                                  )}
+                                  {student.mother_phone && !student.father_phone && (
                                     <div className="flex items-center gap-1">
                                       <Phone className="h-3 w-3" />
                                       {student.mother_phone}
@@ -508,18 +602,88 @@ export default function PendingFees() {
                                   )}
                                 </div>
                               </TableCell>
+                              <TableCell className="text-right">
+                                <span className={cn("font-semibold", student.term1Pending > 0 ? "text-destructive" : "text-muted-foreground")}>
+                                  {formatCurrency(student.term1Pending || 0)}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <span className={cn("font-semibold", student.term2Pending > 0 ? "text-destructive" : "text-muted-foreground")}>
+                                  {formatCurrency(student.term2Pending || 0)}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <span className={cn("font-semibold", student.term3Pending > 0 ? "text-destructive" : "text-muted-foreground")}>
+                                  {formatCurrency(student.term3Pending || 0)}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <span className={cn("font-semibold", student.oldDuesPending > 0 ? "text-destructive" : "text-muted-foreground")}>
+                                  {formatCurrency(student.oldDuesPending || 0)}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <span className={cn("font-semibold", student.transportPending > 0 ? "text-destructive" : "text-muted-foreground")}>
+                                  {formatCurrency(student.transportPending || 0)}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <span className={cn("font-semibold", student.booksPending > 0 ? "text-destructive" : "text-muted-foreground")}>
+                                  {formatCurrency(student.booksPending || 0)}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <span className="font-semibold text-destructive">
+                                  {formatCurrency(student.totalPending || 0)}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                                {student.lastPaymentDate ? new Date(student.lastPaymentDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'No payments'}
+                              </TableCell>
+                              <TableCell>
+                                {student.lastPaymentDate ? (
+                                  <Badge className="bg-orange-500 hover:bg-orange-600 text-white border-none">Partial Paid</Badge>
+                                ) : (
+                                  <Badge className="bg-destructive hover:bg-destructive/90 text-white border-none">Pending</Badge>
+                                )}
+                              </TableCell>
                             </TableRow>
                           ))
                         )}
                       </TableBody>
                     </Table>
                   </div>
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between px-4 py-4 border-t print:hidden">
+                      <div className="text-sm text-muted-foreground">
+                        Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, filteredStudents.length)} of {filteredStudents.length} students
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                          disabled={currentPage === 1}
+                        >
+                          Previous
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                          disabled={currentPage === totalPages}
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
 
             <TabsContent value="yearly" className="mt-4">
-              <div className="mb-4 flex justify-end">
+              <div className="mb-4 flex justify-end print:hidden">
                 <Select value={selectedYear} onValueChange={setSelectedYear}>
                   <SelectTrigger className="w-40">
                     <SelectValue placeholder="Select year" />
@@ -538,7 +702,7 @@ export default function PendingFees() {
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mb-6"
+                className="mb-6 print:hidden"
               >
                 <Card className="border-l-4 border-l-destructive">
                   <CardContent className="flex items-center gap-4 py-4">
@@ -556,7 +720,7 @@ export default function PendingFees() {
               </motion.div>
 
               {/* Pending Category Cards */}
-              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4 mb-6 print:hidden">
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -643,7 +807,7 @@ export default function PendingFees() {
 
               <Card className="card-elevated">
                 <CardHeader>
-                  <CardTitle className="font-display">Pending Fees Details</CardTitle>
+                  <CardTitle className="font-display print:hidden">Pending Fees Details</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-muted-foreground text-center py-8">
@@ -655,6 +819,20 @@ export default function PendingFees() {
           </Tabs>
         </motion.div>
       </div>
+      <style>{`
+        @media print {
+          @page { margin: 1cm; size: landscape; }
+          body { 
+            background: white; 
+            -webkit-print-color-adjust: exact !important; 
+          }
+          .card-elevated { box-shadow: none !important; border: none !important; }
+          .table-header th { background-color: #f1f5f9 !important; border-bottom: 2px solid #cbd5e1 !important; color: #000 !important; }
+          td, th { padding: 8px 4px !important; font-size: 11px !important; }
+          .badge { border: 1px solid #ccc !important; }
+          * { text-shadow: none !important; }
+        }
+      `}</style>
     </DashboardLayout>
   );
 }

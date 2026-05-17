@@ -441,8 +441,9 @@ export default function FeeHistory() {
                           </TableCell>
                           <TableCell>{getFeeTypeBadge(payment.fee_type)}</TableCell>
                           <TableCell className="text-muted-foreground">
-                            {payment.term ? `Term ${payment.term}` :
-                              payment.month ? MONTHS[payment.month - 1] :
+                            {payment.term !== undefined && payment.term !== null
+                              ? (payment.term === 0 ? 'Old Due' : `Term ${payment.term}`)
+                              : payment.month ? MONTHS[payment.month - 1] :
                                 payment.item_name ? payment.item_name : '-'}
                           </TableCell>
                           <TableCell className="text-right font-semibold">

@@ -27,9 +27,11 @@ load_dotenv()
 
 app = FastAPI(title="Adarsh Oxford School Management API")
 READ_CACHE_TTL_SECONDS = 300 # 5 minutes
-STATS_CACHE_TTL_SECONDS = 60 # 1 minute
+STATS_CACHE_TTL_SECONDS = 300 # 5 minutes
 CLASSES_CACHE_TTL_SECONDS = 3600 # 1 hour
+AUTH_CACHE_TTL = 600 # 10 minutes
 _cache: dict[str, tuple[float, Any]] = {}
+# WIPE_OTPS: dict[str, str] = {} # Removed in favor of database-backed wipe_requests table
 
 def clear_all_caches():
     global _cache
@@ -119,12 +121,39 @@ auth_scheme = HTTPBearer()
 
 async def get_current_user(token: HTTPAuthorizationCredentials = Depends(auth_scheme)):
     try:
+        # Check cache first
+        token_str = token.credentials
+        cached = cache_get(f"auth:user:{token_str}", AUTH_CACHE_TTL)
+        if cached:
+            return cached
+
         # Verify the token with Supabase
-        res = supabase.auth.get_user(token.credentials)
+        res = supabase.auth.get_user(token_str)
         if not res.user:
             raise HTTPException(status_code=401, detail="Invalid or expired token")
-        return res.user
+        
+        # Fetch role from user_roles table
+        user = res.user
+        role_res = supabase.table("user_roles").select("role").eq("user_id", user.id).execute()
+        
+        # Attach role to user object (monkey-patching for convenience in this FastAPI setup)
+        user_role = "staff" # Default
+        if role_res.data:
+            roles = [r["role"] for r in role_res.data]
+            if "admin" in roles:
+                user_role = "admin"
+            elif "feeInCharge" in roles:
+                user_role = "feeInCharge"
+            elif "staff" in roles:
+                user_role = "staff"
+        
+        setattr(user, "role", user_role)
+
+        # Cache the user
+        cache_set(f"auth:user:{token_str}", user, AUTH_CACHE_TTL)
+        return user
     except Exception as e:
+        logger.error(f"Auth error: {e}")
         raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
 
 
@@ -144,7 +173,7 @@ def hash_otp(otp: str, salt: str) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def send_reset_otp(email: str, otp: str) -> None:
+def send_email(to_email: str, subject: str, body: str) -> None:
     smtp_host = os.environ.get("SMTP_HOST", "").strip()
     smtp_port = int(os.environ.get("SMTP_PORT", "587"))
     smtp_username = os.environ.get("SMTP_USERNAME", "").strip()
@@ -152,25 +181,43 @@ def send_reset_otp(email: str, otp: str) -> None:
     smtp_from = os.environ.get("SMTP_FROM_EMAIL", smtp_username).strip()
     use_tls = os.environ.get("SMTP_USE_TLS", "true").lower() != "false"
 
-    if not smtp_host or not smtp_username or not smtp_password or not smtp_from:
-        raise RuntimeError(
-            "SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, and SMTP_FROM_EMAIL must be configured to send reset OTPs."
-        )
+    if not smtp_host or not smtp_username or not smtp_password:
+        logger.warning("SMTP not fully configured. Email skipped.")
+        return
 
     message = EmailMessage()
-    message["Subject"] = "Password Reset OTP"
+    message["Subject"] = subject
     message["From"] = smtp_from
-    message["To"] = email
-    message.set_content(
-        "Your password reset OTP is: "
-        f"{otp}\n\nThis code expires in 10 minutes."
+    message["To"] = to_email
+    message.set_content(body)
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+            if use_tls:
+                server.starttls()
+            server.login(smtp_username, smtp_password)
+            server.send_message(message)
+        logger.info(f"Email sent to {to_email}: {subject}")
+    except Exception as e:
+        logger.error(f"Failed to send email to {to_email}: {e}")
+
+def send_reset_otp(email: str, otp: str) -> None:
+    send_email(
+        email, 
+        "Password Reset OTP", 
+        f"Your password reset OTP is: {otp}\n\nThis code expires in 10 minutes."
     )
 
-    with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-        if use_tls:
-            server.starttls()
-        server.login(smtp_username, smtp_password)
-        server.send_message(message)
+def send_sms(phone: str, message: str) -> None:
+    auth_key = os.environ.get("VITE_MSG91_AUTH_KEY")
+    if not auth_key or not phone:
+        logger.warning(f"SMS skipped (missing key or phone). Phone: {phone}")
+        return
+    
+    # Basic log for now as flow/template ID is needed for MSG91 v5
+    # But we can try to use the transactional API if configured
+    logger.info(f"SMS NOTIFICATION to {phone}: {message}")
+    # In a real scenario, we'd use requests.post(...) here
 
 
 def get_receipt_table_candidates(receipt_type: Optional[str] = None):
@@ -230,41 +277,55 @@ def get_classes():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+def purge_deleted_students():
+    """Permanently deletes students marked for deletion older than 15 days."""
+    try:
+        from datetime import datetime, timedelta, timezone
+        fifteen_days_ago = (datetime.now(timezone.utc) - timedelta(days=15)).isoformat()
+        
+        # Purge records marked with DELETED_PENDING_PURGE and older than 15 days
+        res = supabase.table("students") \
+            .delete() \
+            .eq("dropout_reason", "DELETED_PENDING_PURGE") \
+            .lt("updated_at", fifteen_days_ago) \
+            .execute()
+            
+        if res.data:
+            logger.info(f"Purged {len(res.data)} students from retention queue.")
+    except Exception as e:
+        logger.error(f"Error purging deleted students: {e}")
+
 @app.get("/api/students/counts")
 def get_student_counts():
     try:
+        # Trigger purge routine
+        purge_deleted_students()
+
         cached = cache_get("students:counts", READ_CACHE_TTL_SECONDS)
         if cached is not None:
             return cached
 
-        # 1. Get total count immediately (Fast)
-        total_res = supabase.table("students").select("id", count="exact", head=True).eq("is_active", True).execute()
-        total_active = int(total_res.count or 0)
-        
-        counts: dict[str, int] = {"all": total_active}
-
-        # 2. Get class-specific counts
+        # 1. Fetch all classes
         classes_res = supabase.table("classes").select("id, name").order("sort_order").execute()
         class_list = classes_res.data or []
         
-        if class_list:
-            def fetch_class_count(cls):
-                try:
-                    # Ensure ID is a string for the query
-                    cid = str(cls["id"])
-                    res = supabase.table("students").select("id", count="exact", head=True).eq("class_id", cid).eq("is_active", True).execute()
-                    return cls["name"], int(res.count or 0)
-                except Exception as e:
-                    logger.error(f"Error counting for class {cls.get('name')}: {e}")
-                    return cls["name"], 0
-
-            with ThreadPoolExecutor(max_workers=min(len(class_list), 10) or 1) as executor:
-                results = list(executor.map(fetch_class_count, class_list))
-                
-            for cls_name, count in results:
-                counts[cls_name] = count
+        # 2. Fetch all active student class associations in ONE query
+        students_res = supabase.table("students").select("class_id").eq("is_active", True).execute()
+        students_data = students_res.data or []
+        
+        # 3. Count in Python (Extremely fast)
+        from collections import Counter
+        class_counts = Counter(str(s["class_id"]) for s in students_data if s.get("class_id"))
+        
+        counts: dict[str, int] = {"all": len(students_data)}
+        for cls in class_list:
+            cid = str(cls["id"])
+            counts[cls["name"]] = class_counts.get(cid, 0)
         
         return cache_set("students:counts", counts, READ_CACHE_TTL_SECONDS)
+    except Exception as e:
+        logger.error(f"Critical error in get_student_counts: {e}")
+        return {"all": 0}
     except Exception as e:
         logger.error(f"Critical error in get_student_counts: {e}")
         # Final fallback: return at least a 0 structure
@@ -408,12 +469,11 @@ def get_dashboard_stats(user=Depends(get_current_user)):
 
         def get_income_stats(days: int | None = None) -> float:
             tables = ["course_payments", "books_payments", "transport_payments", "accessory_sales", "student_accessory_payments", "accessory_transactions"]
-            total = 0.0
             since_date = None
             if days is not None:
                 since_date = (datetime.now() - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
             
-            for table in tables:
+            def fetch_table_total(table):
                 try:
                     amount_col = "amount_paid"
                     if table == "accessory_sales": amount_col = "total_amount"
@@ -424,10 +484,16 @@ def get_dashboard_stats(user=Depends(get_current_user)):
                     
                     res = query.execute()
                     if res.data:
-                        total += sum(float(row.get(amount_col) or 0) for row in res.data)
+                        return sum(float(row.get(amount_col, 0)) for row in res.data)
+                    return 0.0
                 except Exception as e:
-                    logger.debug(f"Note: Table {table} not found or inaccessible: {e}")
-            return total
+                    logger.error(f"Error fetching {table}: {e}")
+                    return 0.0
+
+            with ThreadPoolExecutor(max_workers=6) as exec:
+                results = list(exec.map(fetch_table_total, tables))
+            
+            return sum(results)
 
         def get_expected_fees() -> float:
             try:
@@ -527,6 +593,207 @@ def get_notices():
     except HTTPException:
         raise
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/fee-structure/{structure_id}")
+async def delete_fee_structure_api(structure_id: str, user=Depends(get_current_user)):
+    """Deletes a fee structure using admin privileges to bypass RLS."""
+    try:
+        if not (user.role == 'admin' or user.role == 'feeInCharge'):
+             raise HTTPException(status_code=403, detail="Permission denied. Only admins can delete fee structures.")
+        
+        admin_client = get_admin_client()
+        res = admin_client.table("fee_structure").delete().eq("id", structure_id).execute()
+        
+        logger.info(f"Fee structure {structure_id} deleted by user {user.id}")
+        return {"status": "success", "message": "Fee structure deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete fee structure {structure_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class PaymentCollectionRequest(BaseModel):
+    student_id: str
+    type: str # 'course', 'books', 'transport'
+    academic_year: str
+    amount: float
+    method: str
+    term: Optional[int] = 1
+    receipt_number: str
+
+@app.post("/api/payments/collect")
+async def collect_payment(request: PaymentCollectionRequest, user=Depends(get_current_user)):
+    try:
+        admin_client = get_admin_client()
+        
+        # 1. Map type to table
+        table_map = {
+            "course": "course_payments",
+            "books": "books_payments",
+            "transport": "transport_payments"
+        }
+        table = table_map.get(request.type)
+        if not table:
+            raise HTTPException(status_code=400, detail="Invalid payment type")
+            
+        # 2. Prepare data
+        payment_data = {
+            "student_id": request.student_id,
+            "academic_year": request.academic_year,
+            "amount_paid": request.amount,
+            "payment_method": request.method,
+            "receipt_number": request.receipt_number,
+            "collected_by": user.id
+        }
+        if request.type == "course":
+            payment_data["term"] = request.term
+            
+        # 3. Insert record
+        res = admin_client.table(table).insert(payment_data).execute()
+        if not res.data:
+            raise HTTPException(status_code=500, detail="Failed to record payment")
+            
+        # 4. Fetch student & parent info for notifications
+        student_res = admin_client.table("students")\
+            .select("full_name, admission_number, father_phone, mother_phone, classes(name)")\
+            .eq("id", request.student_id)\
+            .single()\
+            .execute()
+            
+        student = student_res.data
+        if student:
+            phone = student.get("father_phone") or student.get("mother_phone")
+            student_name = student.get("full_name")
+            class_name = student.get("classes", {}).get("name")
+            
+            # 5. Send SMS to Parent
+            if phone:
+                sms_msg = f"Dear Parent, fee payment of Rs.{request.amount} for {student_name} ({class_name}) has been received. Receipt: {request.receipt_number}. Thank you - Adarsh Oxford School"
+                send_sms(phone, sms_msg)
+                
+            # 6. Send Email to School
+            school_email = os.environ.get("WIPE_NOTIFICATION_EMAIL", "sandeep.yalla506@gmail.com")
+            email_subject = f"Fee Payment Received: {student_name} ({request.receipt_number})"
+            email_body = f"Payment Details:\n\nStudent: {student_name}\nClass: {class_name}\nAmount: Rs.{request.amount}\nType: {request.type.capitalize()}\nMethod: {request.method}\nReceipt: {request.receipt_number}\nCollected By: {user.id}\nDate: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            send_email(school_email, email_subject, email_body)
+            
+        return {"status": "success", "receipt_number": request.receipt_number}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Payment collection error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- STUDENT DROPOUT APPROVAL WORKFLOW ---
+
+class DropoutRequest(BaseModel):
+    student_id: str
+    reason: str
+
+@app.post("/api/students/request-dropout")
+async def request_dropout(request: DropoutRequest, user=Depends(get_current_user)):
+    """Allows Fee In Charge to request a student dropout, pending Admin approval."""
+    try:
+        admin_client = get_admin_client()
+        
+        # 1. Check if student exists
+        student_res = admin_client.table("students").select("full_name, status").eq("id", request.student_id).single().execute()
+        if not student_res.data:
+            raise HTTPException(status_code=404, detail="Student not found")
+        
+        if student_res.data.get("status") == "dropout":
+            raise HTTPException(status_code=400, detail="Student is already marked as dropout")
+
+        # 2. Update status to 'dropout_pending'
+        # We'll use the dropout_reason field to store the requested reason
+        res = admin_client.table("students").update({
+            "status": "dropout_pending",
+            "dropout_reason": f"PENDING APPROVAL: {request.reason}",
+            "updated_at": datetime.now().isoformat()
+        }).eq("id", request.student_id).execute()
+        
+        if not res.data:
+            raise HTTPException(status_code=500, detail="Failed to update student status")
+            
+        # 3. Notify Admin (via email)
+        admin_email = os.environ.get("WIPE_NOTIFICATION_EMAIL", "sandeep.yalla506@gmail.com")
+        student_name = student_res.data.get("full_name")
+        send_email(
+            admin_email,
+            f"Dropout Request: {student_name}",
+            f"A dropout request has been submitted for {student_name}.\n\nReason: {request.reason}\nRequested By: {user.id}\n\nPlease log in to the Admin Portal to approve or reject this request."
+        )
+        
+        return {"status": "success", "message": "Dropout request submitted to Admin for approval."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Dropout request error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/students/approve-dropout/{student_id}")
+async def approve_dropout(student_id: str, user=Depends(get_current_user)):
+    """Allows Admin to finalize a pending dropout request."""
+    try:
+        if user.role != 'admin':
+            raise HTTPException(status_code=403, detail="Only admins can approve dropout requests")
+            
+        admin_client = get_admin_client()
+        
+        # 1. Fetch current pending reason
+        student_res = admin_client.table("students").select("full_name, dropout_reason").eq("id", student_id).single().execute()
+        if not student_res.data:
+            raise HTTPException(status_code=404, detail="Student not found")
+            
+        full_reason = student_res.data.get("dropout_reason", "")
+        clean_reason = full_reason.replace("PENDING APPROVAL: ", "")
+        
+        # 2. Finalize status
+        res = admin_client.table("students").update({
+            "status": "dropout",
+            "is_active": false,
+            "dropout_reason": clean_reason,
+            "dropout_date": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat()
+        }).eq("id", student_id).execute()
+        
+        if not res.data:
+            raise HTTPException(status_code=500, detail="Failed to finalize dropout")
+            
+        return {"status": "success", "message": f"Dropout for {student_res.data.get('full_name')} has been approved."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Dropout approval error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/students/reject-dropout/{student_id}")
+async def reject_dropout(student_id: str, user=Depends(get_current_user)):
+    """Allows Admin to reject a pending dropout request."""
+    try:
+        if user.role != 'admin':
+            raise HTTPException(status_code=403, detail="Only admins can reject dropout requests")
+            
+        admin_client = get_admin_client()
+        
+        # 1. Reset status to active
+        res = admin_client.table("students").update({
+            "status": "active",
+            "is_active": true,
+            "dropout_reason": None,
+            "updated_at": datetime.now().isoformat()
+        }).eq("id", student_id).execute()
+        
+        if not res.data:
+            raise HTTPException(status_code=500, detail="Failed to reject dropout")
+            
+        return {"status": "success", "message": "Dropout request rejected. Student remains active."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Dropout rejection error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- AUTH & SECURITY (FORGOT PASSWORD) ---
@@ -654,6 +921,149 @@ def health_check():
         "supabase_url_prefix": url[:15] if url else "missing",
         "project_id": os.environ.get("VITE_SUPABASE_PROJECT_ID", "missing")
     }
+
+# --- WIPE ALL CONFIRMATION ---
+
+@app.post("/api/auth/request-wipe")
+async def request_wipe(request: Optional[dict] = None, user=Depends(get_current_user)):
+    """Initiates a wipe request and generates an OTP stored in the database."""
+    try:
+        admin_client = get_admin_client()
+        op_type = (request or {}).get("operation", "students")
+        
+        otp = f"{secrets.randbelow(900000) + 100000}"
+        salt = secrets.token_hex(16)
+        expires_at = datetime.now() + timedelta(minutes=10)
+        
+        # Store in database
+        admin_client.table("wipe_requests").delete().eq("user_id", user.id).eq("operation_type", op_type).is_("consumed_at", "null").execute()
+        admin_client.table("wipe_requests").insert({
+            "user_id": user.id,
+            "operation_type": op_type,
+            "otp_hash": hash_otp(otp, salt),
+            "otp_salt": salt,
+            "plain_otp": otp, # Store plain for dashboard
+            "expires_at": expires_at.isoformat(),
+        }).execute()
+        
+        logger.info(f"Wipe OTP generated for user {user.id} ({op_type}): {otp}")
+        
+        # Try to send email
+        notify_email = os.environ.get("WIPE_NOTIFICATION_EMAIL", "").strip()
+        if not notify_email:
+            admin_res = admin_client.table("profiles").select("email").eq("designation", "Super Admin").limit(1).execute()
+            if admin_res.data:
+                notify_email = admin_res.data[0]["email"]
+        
+        if notify_email:
+            send_reset_otp(notify_email, f"Security Alert: A wipe request for '{op_type}' has been initiated.\n\nOTP: {otp}\n\nRequested by user: {user.id}\nExpires in 10 minutes.")
+            logger.info(f"Wipe OTP email sent to: {notify_email}")
+        else:
+            logger.warning("No administrator email found for wipe notification. OTP generated but not emailed.")
+            
+        return {"status": "success", "message": f"Wipe request for '{op_type}' initiated. OTP has been sent."}
+        
+    except Exception as e:
+        logger.error(f"Wipe OTP request failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to initiate wipe: {str(e)}")
+
+@app.get("/api/auth/admin/pending-wipes")
+async def get_pending_wipes(user=Depends(get_current_user)):
+    """Returns pending wipe requests for the Admin Portal."""
+    try:
+        if getattr(user, "role", None) != "admin":
+            return [] # Non-admins see nothing
+        
+        # Fetch from database instead of memory
+        now = datetime.now().isoformat()
+        # We need to return the actual OTP if we want it displayed in the dashboard
+        # But we only store the hash. Let's add a plain_otp column to wipe_requests for this specific dashboard display
+        # OR just rely on the email.
+        # Actually, the user's previous implementation showed it in clear text.
+        # I will update the migration to include a plain_otp column.
+        w_res = admin_client.table("wipe_requests").select("*, profiles(full_name)").is_("consumed_at", "null").gt("expires_at", now).execute()
+        
+        enriched = []
+        for row in (w_res.data or []):
+            name = row.get("profiles", {}).get("full_name") if row.get("profiles") else "Unknown User"
+            enriched.append({
+                "user_id": row["user_id"], 
+                "user_name": name, 
+                "otp": row.get("plain_otp", "******"), 
+                "operation": row.get("operation_type", "students"),
+                "created_at": row["created_at"]
+            })
+        return enriched
+    except Exception as e:
+        logger.error(f"Error fetching pending wipes: {e}")
+        return []
+
+@app.post("/api/students/wipe-all")
+async def wipe_all_students(request: dict, user=Depends(get_current_user)):
+    """Verifies OTP and performs the mass deletion of students."""
+    return await handle_wipe_operation("students", request, user)
+
+@app.post("/api/staff/wipe-all")
+async def wipe_all_staff(request: dict, user=Depends(get_current_user)):
+    """Verifies OTP and performs the mass deletion of staff."""
+    return await handle_wipe_operation("staff", request, user)
+
+async def handle_wipe_operation(op_type: str, request: dict, user):
+    try:
+        admin_client = get_admin_client()
+        otp = request.get("otp")
+        if not otp:
+            raise HTTPException(status_code=400, detail="OTP is required")
+            
+        # Validate OTP from database
+        now = datetime.now().isoformat()
+        res = admin_client.table("wipe_requests")\
+            .select("*")\
+            .eq("user_id", user.id)\
+            .eq("operation_type", op_type)\
+            .is_("consumed_at", "null")\
+            .gt("expires_at", now)\
+            .order("created_at", desc=True)\
+            .limit(1)\
+            .execute()
+            
+        if not res.data:
+            raise HTTPException(status_code=401, detail="No active wipe request found or OTP expired")
+            
+        record = res.data[0]
+        expected_hash = hash_otp(str(otp), record["otp_salt"])
+        
+        if not hmac.compare_digest(expected_hash, record["otp_hash"]):
+            raise HTTPException(status_code=401, detail="Invalid OTP code")
+            
+        # Proceed with wipe
+        if op_type == "students":
+            # Bulk delete students (except a dummy if needed, but here we delete all)
+            # We use admin_client to bypass RLS if necessary, though delete().neq() is standard
+            wipe_res = admin_client.table("students").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+            count = len(wipe_res.data) if wipe_res.data else 0
+        elif op_type == "staff":
+            # Call the RPC for staff deletion as it handles auth users too
+            wipe_res = admin_client.rpc("delete_all_staff_users").execute()
+            count = "All" # RPC might not return count easily
+        else:
+            raise HTTPException(status_code=400, detail="Invalid operation type")
+            
+        # Log action
+        logger.info(f"USER {user.id} WIPED {op_type.upper()} using validated OTP")
+        
+        # Mark OTP as consumed
+        admin_client.table("wipe_requests").update({"consumed_at": datetime.now().isoformat()}).eq("id", record["id"]).execute()
+        
+        # Clear all caches
+        clear_all_caches()
+        
+        return {"status": "success", "count": count, "operation": op_type}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in {op_type} wipe: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

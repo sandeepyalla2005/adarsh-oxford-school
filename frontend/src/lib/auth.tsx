@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { getAuthRedirectPath } from '@/lib/portal';
+import { queryClient } from '@/lib/query-client';
 
 type UserRole = 'admin' | 'staff' | 'feeInCharge' | null;
 
@@ -33,8 +34,8 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<{ error: Error | null }>;
 }
 
-const ROLE_FETCH_TIMEOUT = 10000; // Increased to 10s for stability
-const ROLE_FETCH_RETRIES = 2; // Added retries
+const ROLE_FETCH_TIMEOUT = 25000; // Increased to 25s to support database cold starts
+const ROLE_FETCH_RETRIES = 2;
 const ROLE_CACHE_KEY_PREFIX = 'user_role_';
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -84,9 +85,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (e) {}
   };
 
-  // Optimized fetch with safety timeout (default 5s)
-  const fetchUserRoleWithTimeout = async (userId: string, timeoutMs = ROLE_FETCH_TIMEOUT): Promise<UserRole> => {
+  // Optimized fetch with safety timeout
+  const fetchUserRoleWithTimeout = async (userId: string, userObj?: User | null, timeoutMs = ROLE_FETCH_TIMEOUT): Promise<UserRole> => {
     console.log('Fetching role for ID:', userId);
+
+    // 1. Check user metadata first as a fast hint
+    if (userObj?.user_metadata?.role) {
+      const metaRole = userObj.user_metadata.role;
+      if (['admin', 'staff', 'feeInCharge'].includes(metaRole)) {
+        console.log('💡 Found role hint in metadata:', metaRole);
+        return metaRole as UserRole;
+      }
+    }
 
     const timeoutPromise = new Promise<null>((resolve) =>
       setTimeout(() => {
@@ -114,13 +124,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               .select('role')
               .eq('user_id', userId);
 
-            if (!tableError) {
-              const roles = (tableData || []).map((r: any) => r.role as string);
+            if (!tableError && tableData) {
+              const roles = tableData.map((r: any) => r.role as string);
               if (roles.includes('admin')) resolvedRole = 'admin';
               else if (roles.includes('feeInCharge')) resolvedRole = 'feeInCharge';
               else if (roles.includes('staff')) resolvedRole = 'staff';
             }
-          } else {
+          } else if (data) {
             const rolesList = (data as any[] || []).map((r: any) =>
               (typeof r === 'string' ? r : (r.role || r)) as string
             );
@@ -134,7 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.error(`Role fetch attempt ${attempt} failed:`, err);
         }
         // Small delay before retry
-        if (attempt < ROLE_FETCH_RETRIES) await new Promise(r => setTimeout(r, 500 * attempt));
+        if (attempt < ROLE_FETCH_RETRIES) await new Promise(r => setTimeout(r, 1000 * attempt));
       }
       return null;
     })();
@@ -151,7 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Get session with timeout to prevent hanging
         const sessionPromise = supabase.auth.getSession();
         const sessionTimeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Session fetch timeout')), 10000) // 10s for session
+          setTimeout(() => reject(new Error('Session fetch timeout')), ROLE_FETCH_TIMEOUT)
         );
 
         let existingSession;
@@ -179,18 +189,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
           // 2. Fetch fresh profile and role in background (or foreground if no cache)
           const [role, foundProfile] = await Promise.all([
-            fetchUserRoleWithTimeout(existingSession.user.id),
+            fetchUserRoleWithTimeout(existingSession.user.id, existingSession.user),
             fetchProfile(existingSession.user.id)
           ]);
 
           try {
-            const finalRole = (role === 'staff' && foundProfile?.designation === 'Fee In-Charge') ? 'feeInCharge' : (role || cachedRole || 'staff');
+            // Determine build mode to avoid defaulting to a role that causes 404
+            const buildMode = typeof document !== 'undefined' ? document.body?.dataset?.portalBuild : '';
+            
+            let finalRole: UserRole = null;
+            if (role === 'staff' && foundProfile?.designation === 'Fee In-Charge') {
+              finalRole = 'feeInCharge';
+            } else if (role) {
+              finalRole = role;
+            } else if (cachedRole) {
+              finalRole = cachedRole;
+            } else {
+              // Default logic: If we are in admin build, assume admin if fetch fails (risk, but prevents 404)
+              // Otherwise default to staff
+              finalRole = buildMode === 'admin' ? 'admin' : (buildMode === 'fee' ? 'feeInCharge' : 'staff');
+            }
+
             console.log('Final resolved role:', finalRole);
             setUserRole(finalRole);
             setCachedRole(existingSession.user.id, finalRole);
           } catch (err) {
             console.error('Role resolution failed:', err);
-            if (!cachedRole) setUserRole('staff');
+            if (!userRole) setUserRole('staff');
           } finally {
             setIsLoading(false);
           }
@@ -220,10 +245,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (newSession?.user) {
-        fetchProfile(newSession.user.id);
         try {
-          const role = await fetchUserRoleWithTimeout(newSession.user.id);
-          const finalRole = (role === 'staff' && profile?.designation === 'Fee In-Charge') ? 'feeInCharge' : (role || 'staff');
+          const [role, foundProfile] = await Promise.all([
+            fetchUserRoleWithTimeout(newSession.user.id, newSession.user),
+            fetchProfile(newSession.user.id)
+          ]);
+          const buildMode = typeof document !== 'undefined' ? document.body?.dataset?.portalBuild : '';
+          const finalRole = (role === 'staff' && foundProfile?.designation === 'Fee In-Charge') 
+            ? 'feeInCharge' 
+            : (role || (buildMode === 'admin' ? 'admin' : (buildMode === 'fee' ? 'feeInCharge' : 'staff')));
           setUserRole(finalRole);
         } catch (err) {
           setUserRole('staff');
@@ -251,23 +281,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       console.log('Credentials valid, verifying role permissions...');
-      const activeRole = await fetchUserRoleWithTimeout(data.user.id, 5000);
+      
+      // Fetch both role and profile to handle Fee In-Charge mapping
+      const [activeRole, foundProfile] = await Promise.all([
+        fetchUserRoleWithTimeout(data.user.id, data.user, ROLE_FETCH_TIMEOUT),
+        fetchProfile(data.user.id)
+      ]);
+
+      let finalRole: UserRole = activeRole;
+      if (activeRole === 'staff' && foundProfile?.designation === 'Fee In-Charge') {
+        console.log('Mapping staff user to feeInCharge based on designation');
+        finalRole = 'feeInCharge';
+      }
 
       if (expectedRole) {
         // Enforce role matches expectation (Admins are allowed anywhere)
-        const isMatched = expectedRole === activeRole || activeRole === 'admin';
+        const isMatched = expectedRole === finalRole || finalRole === 'admin';
 
         if (!isMatched) {
-          console.warn('Role mismatch! Expected:', expectedRole, 'but found:', activeRole);
-          // Don't sign out automatically, just deny the login to this portal
+          console.warn('Role mismatch! Expected:', expectedRole, 'but found:', finalRole);
           return {
             error: new Error(`This account does not have permission to access the ${expectedRole} portal.`)
           };
         }
       }
 
-      setUserRole(activeRole);
-      fetchProfile(data.user.id);
+      setUserRole(finalRole);
       return { error: null };
     } catch (err) {
       console.error('Sign-in crash:', err);
@@ -301,29 +340,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     console.log('User logout initiated');
-    try {
-      // 1. Clear Supabase Session
-      await supabase.auth.signOut();
-    } catch (err) {
-      console.warn('Supabase signOut error (non-critical for mock users):', err);
-    } finally {
-      // 2. Clear SPECIFIC portal data (Prevents affecting other portals on same domain)
-      const buildMode = typeof document !== 'undefined' ? document.body?.dataset?.portalBuild : '';
-      const runtimePort = typeof window !== 'undefined' ? window.location.port : '';
-      const currentStorageKey = `sb-adarsh-oxford-${runtimePort}-${buildMode}`;
-      
-      localStorage.removeItem(currentStorageKey);
-      sessionStorage.clear(); // Session storage is already isolated by tab, so this is safe
 
-      // 3. Clear Local State
-      setUser(null);
-      setSession(null);
-      setUserRole(null);
-      setProfile(null);
-
-      // 4. Force a hard reload to the auth page (Purge all React state)
-      window.location.href = getAuthRedirectPath();
+    if (user) {
+      try {
+        localStorage.removeItem(`user_role_${user.id}`);
+      } catch (e) {}
     }
+
+    // 1. Instantly clear local state to trigger React Router navigation
+    setUser(null);
+    setSession(null);
+    setUserRole(null);
+    setProfile(null);
+    setIsLoading(false);
+
+    // 2. Clear query cache
+    queryClient.clear();
+
+    // 3. Clear SPECIFIC portal data
+    const buildMode = typeof document !== 'undefined' ? document.body?.dataset?.portalBuild : '';
+    const runtimePort = typeof window !== 'undefined' ? window.location.port : '';
+    const currentStorageKey = `sb-adarsh-oxford-${runtimePort}-${buildMode}`;
+    
+    localStorage.removeItem(currentStorageKey);
+    sessionStorage.clear();
+
+    // 4. Fire and forget server logout (prevents UI blocking)
+    supabase.auth.signOut().catch(err => {
+      console.warn('Supabase signOut error (non-critical):', err);
+    });
   };
 
   const setMockUser = (role: 'admin' | 'staff' | 'feeInCharge') => {

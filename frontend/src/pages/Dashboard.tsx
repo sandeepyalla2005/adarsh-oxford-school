@@ -117,6 +117,7 @@ export default function Dashboard() {
   const [notices, setNotices] = useState<{ id: number; title: string; content: string; created_at: string; author: string; pinned: boolean; expires_at?: string }[]>([]);
   const [isNoticesLoading, setIsNoticesLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pendingWipes, setPendingWipes] = useState<{ user_id: string; user_name: string; otp: string }[]>([]);
 
   useEffect(() => {
     const fetchDashboardStats = async () => {
@@ -197,6 +198,26 @@ export default function Dashboard() {
     };
   }, []);
 
+  useEffect(() => {
+    if (userRole !== 'admin') return;
+
+    const fetchPendingWipes = async () => {
+      try {
+        const resp = await apiFetch('/api/auth/admin/pending-wipes');
+        if (resp.ok) {
+          const data = await resp.json();
+          setPendingWipes(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch pending wipes:', err);
+      }
+    };
+
+    fetchPendingWipes();
+    const interval = setInterval(fetchPendingWipes, 5000); // Poll every 5s
+    return () => clearInterval(interval);
+  }, [userRole]);
+
   if (authLoading || (user && userRole === null)) {
     return (
       <DashboardLayout>
@@ -216,7 +237,7 @@ export default function Dashboard() {
     );
   }
 
-  if (userRole === 'staff') {
+  if (userRole === 'staff' || portal === 'staff') {
     return <StaffDashboard />;
   }
 
@@ -283,6 +304,46 @@ export default function Dashboard() {
             </div>
           </div>
         </motion.div>
+
+        {/* Pending Wipe Requests Alert */}
+        {pendingWipes.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="mb-8 p-6 rounded-[2rem] bg-gradient-to-r from-red-50 to-white border-2 border-red-100 shadow-xl shadow-red-500/10 flex flex-col md:flex-row items-center justify-between gap-6"
+          >
+            <div className="flex items-center gap-5">
+              <div className="h-16 w-16 rounded-[1.25rem] bg-red-100 flex items-center justify-center animate-bounce shadow-inner">
+                <XCircle className="h-10 w-10 text-red-600" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-xl font-black text-red-800 font-display">System Wipe Requested!</h3>
+                <p className="text-red-600 text-sm font-bold flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-red-600 animate-pulse" />
+                  {pendingWipes[0].user_name} is requesting a full database wipe.
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-4 bg-white px-8 py-4 rounded-[1.5rem] border-2 border-red-200 shadow-lg group">
+              <div className="flex flex-col items-center">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Confirmation OTP</span>
+                <span className="text-4xl font-black text-red-600 font-display tracking-[0.3em] group-hover:scale-110 transition-transform">
+                  {pendingWipes[0].otp}
+                </span>
+              </div>
+              <div className="h-10 w-px bg-red-100" />
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="text-red-400 hover:text-red-600 font-bold"
+                onClick={() => setPendingWipes([])} // Temporary hide
+              >
+                Dismiss
+              </Button>
+            </div>
+          </motion.div>
+        )}
 
         {/* Recent Notices Section */}
         <motion.div
@@ -465,11 +526,11 @@ export default function Dashboard() {
         </div>
 
         {/* Daily Collection Split - Replaces Pending Fee Summary */}
-        <div className="grid gap-6 sm:grid-cols-3">
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {[
             {
               id: 'Course',
-              title: "Course Fee Collection",
+              title: "Course Fee",
               value: selectedTimeRange === 'today' ? stats.todayCourse : selectedTimeRange === 'week' ? stats.weeklyCourse : stats.monthlyCourse,
               pending: stats.pendingCourse,
               icon: <IndianRupee className="h-6 w-6 text-blue-600" />,
@@ -481,7 +542,7 @@ export default function Dashboard() {
             },
             {
               id: 'Books',
-              title: "Books Fee Collection",
+              title: "Books Fee",
               value: selectedTimeRange === 'today' ? stats.todayBooks : selectedTimeRange === 'week' ? stats.weeklyBooks : stats.monthlyBooks,
               pending: stats.pendingBooks,
               icon: <BookOpen className="h-6 w-6 text-amber-600" />,
@@ -493,7 +554,7 @@ export default function Dashboard() {
             },
             {
               id: 'Transport',
-              title: "Transport Fee Collection",
+              title: "Transport Fee",
               value: selectedTimeRange === 'today' ? stats.todayTransport : selectedTimeRange === 'week' ? stats.weeklyTransport : stats.monthlyTransport,
               pending: stats.pendingTransport,
               icon: <Bus className="h-6 w-6 text-emerald-600" />,
@@ -505,7 +566,7 @@ export default function Dashboard() {
             },
             {
               id: 'Accessory',
-              title: "Accessories & Other",
+              title: "Accessories",
               value: selectedTimeRange === 'today' ? stats.todayAccessories : selectedTimeRange === 'week' ? stats.weeklyAccessories : stats.monthlyAccessories,
               pending: stats.pendingAccessories,
               icon: <Plus className="h-6 w-6 text-purple-600" />,
@@ -750,11 +811,11 @@ export default function Dashboard() {
 
             <div className="p-8 space-y-4 bg-slate-50/50">
               {[
-                { label: 'Cash', value: (categoryBreakdowns[selectedTimeRange] as any)[selectedCategory].cash, icon: Wallet, color: 'text-blue-600', bg: 'bg-blue-50' },
-                { label: 'UPI', value: (categoryBreakdowns[selectedTimeRange] as any)[selectedCategory].upi, icon: QrCode, color: 'text-orange-600', bg: 'bg-orange-50' },
-                { label: 'Bank', value: (categoryBreakdowns[selectedTimeRange] as any)[selectedCategory].bank, icon: Building2, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-                { label: 'Cards', value: (categoryBreakdowns[selectedTimeRange] as any)[selectedCategory].cards, icon: CreditCard, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-                { label: 'Swiping', value: (categoryBreakdowns[selectedTimeRange] as any)[selectedCategory].swiping, icon: Smartphone, color: 'text-purple-600', bg: 'bg-purple-50' },
+                { label: 'Cash', value: (categoryBreakdowns[selectedTimeRange] as any)[selectedCategory]?.cash || 0, icon: Wallet, color: 'text-blue-600', bg: 'bg-blue-50' },
+                { label: 'UPI', value: (categoryBreakdowns[selectedTimeRange] as any)[selectedCategory]?.upi || 0, icon: QrCode, color: 'text-orange-600', bg: 'bg-orange-50' },
+                { label: 'Bank', value: (categoryBreakdowns[selectedTimeRange] as any)[selectedCategory]?.bank || 0, icon: Building2, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+                { label: 'Cards', value: (categoryBreakdowns[selectedTimeRange] as any)[selectedCategory]?.cards || 0, icon: CreditCard, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                { label: 'Swiping', value: (categoryBreakdowns[selectedTimeRange] as any)[selectedCategory]?.swiping || 0, icon: Smartphone, color: 'text-purple-600', bg: 'bg-purple-50' },
               ].map((mode, i) => (
                 <div key={i} className="flex items-center justify-between p-4 rounded-2xl bg-white border border-slate-100 shadow-sm transition-all hover:bg-slate-50">
                   <div className="flex items-center gap-3">

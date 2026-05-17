@@ -1,13 +1,13 @@
-import { Component, lazy, Suspense } from "react";
+import { Component, lazy, Suspense, useEffect } from "react";
 import type { ReactNode } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/lib/auth";
-import { getPortalDashboardPath, getPortalFromRole, portalPath, type PortalType } from "@/lib/portal";
-import Auth from "./pages/Auth";
+import { getPortalDashboardPath, getPortalFromRole, portalPath, getPortalBasePath, getPortalFromPath, getPortalAuthPath, type PortalType } from "@/lib/portal";
+import PortalAuth from "./components/auth/PortalAuth";
 
 // Helper to handle ChunkLoadError by forcing a reload
 const lazyWithRetry = (componentImport: () => Promise<any>) => 
@@ -68,16 +68,7 @@ const FeeAnalytics = lazyWithRetry(() => import("./pages/FeeAnalytics"));
 const AccessoriesFees = lazyWithRetry(() => import("./pages/AccessoriesFees"));
 const TableRegistryCheck = lazyWithRetry(() => import("./pages/TableRegistryCheck"));
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 5 * 60 * 1000, // 5 minutes
-      gcTime: 10 * 60 * 1000, // 10 minutes
-      retry: 2,
-      refetchOnWindowFocus: false,
-    },
-  },
-});
+import { queryClient } from "@/lib/query-client";
 
 class AppErrorBoundary extends Component<
   { children: ReactNode },
@@ -123,8 +114,8 @@ const RouteLoader = () => (
 type AppMode = "combined" | PortalType;
 
 const ADMIN_AUTH_ROLES = ["admin"] as const;
-const STAFF_AUTH_ROLES = ["staff", "admin"] as const;
-const FEE_AUTH_ROLES = ["feeInCharge", "admin"] as const;
+const STAFF_AUTH_ROLES = ["staff"] as const;
+const FEE_AUTH_ROLES = ["feeInCharge"] as const;
 
 type PortalRouteDef = {
   path: string;
@@ -151,14 +142,14 @@ const portalRoutes: PortalRouteDef[] = [
   { path: "/sms", element: <Sms />, portals: ["admin", "fee"] },
   { path: "/profile", element: <StaffProfile />, portals: ["staff"] },
   { path: "/attendance", element: <Attendance />, portals: ["staff"] },
-  { path: "/attendance", element: <AdminAttendance />, portals: ["admin"] },
+  { path: "/attendance", element: <AdminAttendance />, portals: ["admin", "fee"] },
   { path: "/homework", element: <Homework />, portals: ["staff"] },
-  { path: "/homework", element: <AdminHomework />, portals: ["admin"] },
+  { path: "/homework", element: <AdminHomework />, portals: ["admin", "fee"] },
   { path: "/reports", element: <AcademicReports />, portals: ["staff"] },
   { path: "/schedule", element: <StaffSchedule />, portals: ["staff"] },
   { path: "/users", element: <UserManagement />, portals: ["admin"] },
   { path: "/fee-structure", element: <FeeStructure />, portals: ["admin", "fee"] },
-  { path: "/time-table", element: <TimeTable />, portals: ["admin"] },
+  { path: "/time-table", element: <TimeTable />, portals: ["admin", "fee"] },
   { path: "/academic-calendar", element: <AcademicCalendar />, portals: ["admin", "staff", "fee"] },
   { path: "/audit", element: <AdminAudit />, portals: ["admin"] },
   { path: "/fee-analytics", element: <FeeAnalytics />, portals: ["admin"] },
@@ -177,20 +168,39 @@ function ProtectedRoute({
   mode: AppMode;
 }) {
   const { user, userRole, isLoading } = useAuth();
+  const { pathname } = useLocation();
 
   if (isLoading) {
     return <RouteLoader />;
   }
 
   if (!user) {
-    return <Navigate to="/auth" replace />;
+    const intendedPortal = mode === "combined" ? getPortalFromPath(pathname) : mode;
+    return <Navigate to={getPortalAuthPath(intendedPortal)} replace />;
   }
 
-  if (mode !== "combined") {
+  // Role-based portal enforcement
+  if (mode === "combined") {
+    const activePortal = getPortalFromRole(userRole);
+    const pathPortal = getPortalFromPath(pathname);
+    
+    // If user is on a portal path that doesn't match their role
+    // e.g. Admin on a /staff/ path
+    if (activePortal !== pathPortal && userRole !== 'admin') {
+      return <Navigate to={getPortalDashboardPath(userRole)} replace />;
+    }
+    
+    // Special case: Admin can be anywhere, but if they are on a /staff or /fee path, 
+    // we might want to keep them there IF they intended to go there. 
+    // However, the user explicitly asked to reroute admin to /admin.
+    if (userRole === 'admin' && pathPortal !== 'admin' && pathname.includes('/dashboard')) {
+       return <Navigate to={portalPath('admin', pathname.replace(/^\/(staff|fee)/, ''))} replace />;
+    }
+  } else {
     const activePortal = getPortalFromRole(userRole);
     const isAdmin = userRole === "admin";
     if (activePortal !== mode && !isAdmin) {
-      return <Navigate to="/auth" replace />;
+      return <Navigate to={getPortalAuthPath(mode)} replace />;
     }
   }
 
@@ -198,24 +208,31 @@ function ProtectedRoute({
 }
 
 const PortalRedirect = ({ path }: { path: string }) => {
-  const { userRole } = useAuth();
-  return <Navigate to={portalPath(getPortalFromRole(userRole), path)} replace />;
+  const { userRole, isLoading } = useAuth();
+  // Wait for auth to finish before redirecting to prevent race conditions
+  if (isLoading || !userRole) return <RouteLoader />;
+  return <Navigate to={`/${getPortalFromRole(userRole)}${path.startsWith('/') ? path : '/' + path}`} replace />;
 };
 
 const AppRoutes = ({ mode }: { mode: AppMode }) => {
   const { user, userRole, isLoading } = useAuth();
 
+  // Debug removed - routing is stable
+
   if (isLoading) {
     return <RouteLoader />;
   }
 
-  const dashboardPath = getPortalDashboardPath(userRole);
+  const dashboardPath = mode === 'combined' 
+    ? getPortalDashboardPath(userRole) 
+    : `/${mode}/dashboard`;
   const activePortal = getPortalFromRole(userRole);
-  const allowedPortals = mode === "combined" ? ["admin", "staff", "fee"] : [mode as PortalType];
+  const allowedPortals = mode === "combined" ? (["admin", "staff", "fee"] as PortalType[]) : ([mode] as PortalType[]);
   const portalMatchesBuild = 
     mode === "combined" || 
     activePortal === mode || 
     userRole === "admin";
+    
   const authRoles =
     mode === "combined"
       ? undefined
@@ -225,112 +242,93 @@ const AppRoutes = ({ mode }: { mode: AppMode }) => {
           ? FEE_AUTH_ROLES
           : STAFF_AUTH_ROLES;
 
+  // Filter routes based on allowed portals for this build
+  const filteredRoutes = portalRoutes.filter((route) => 
+    route.portals.some((p) => allowedPortals.includes(p))
+  );
+
   return (
     <Suspense fallback={<RouteLoader />}>
-      <Routes>
-      {mode === "admin" && <Route path="/admin.html" element={<Navigate to="/" replace />} />}
-      {mode === "staff" && <Route path="/staff.html" element={<Navigate to="/" replace />} />}
-      {mode === "fee" && <Route path="/fee.html" element={<Navigate to="/" replace />} />}
-      <Route
-        path="/"
-        element={user && portalMatchesBuild ? <Navigate to={dashboardPath} replace /> : <Navigate to="/auth" replace />}
-      />
-      <Route
-        path="/auth"
-        element={
-          user && portalMatchesBuild ? (
-            <Navigate to={dashboardPath} replace />
-          ) : (
-            <Auth allowedRoles={authRoles} />
-          )
-        }
-      />
-      {mode === "combined" && (
-        <>
-          <Route
-            path="/admin/auth"
-            element={user && portalMatchesBuild ? <Navigate to={portalPath("admin", "/dashboard")} replace /> : <Auth allowedRoles={ADMIN_AUTH_ROLES} />}
-          />
-          <Route
-            path="/staff/auth"
-            element={user && portalMatchesBuild ? <Navigate to={portalPath("staff", "/dashboard")} replace /> : <Auth allowedRoles={STAFF_AUTH_ROLES} />}
-          />
-          <Route
-            path="/fee/auth"
-            element={user && portalMatchesBuild ? <Navigate to={portalPath("fee", "/dashboard")} replace /> : <Auth allowedRoles={FEE_AUTH_ROLES} />}
-          />
-        </>
-      )}
+      <Routes key={mode}>
+        {/* Primary Auth Route */}
+        <Route
+          path="/"
+          element={
+            user && portalMatchesBuild ? (
+              <Navigate to={dashboardPath} replace />
+            ) : (
+              <PortalAuth 
+                portalType={mode === 'combined' ? getPortalFromPath(window.location.pathname) : (mode as 'admin' | 'staff' | 'fee')} 
+                allowedRoles={
+                  mode === 'combined' 
+                    ? (getPortalFromPath(window.location.pathname) === 'admin' ? ADMIN_AUTH_ROLES : getPortalFromPath(window.location.pathname) === 'staff' ? STAFF_AUTH_ROLES : FEE_AUTH_ROLES)
+                    : (authRoles || ADMIN_AUTH_ROLES)
+                } 
+              />
+            )
+          }
+        />
+        
+        {/* Legacy/Convenience Redirects */}
+        <Route path="/auth" element={<Navigate to="/" replace />} />
+        <Route path="/admin" element={<Navigate to="/" replace />} />
+        <Route path="/staff" element={<Navigate to="/" replace />} />
+        <Route path="/fee" element={<Navigate to="/" replace />} />
+        {/* Portal-Specific Auth Routes */}
+        <Route path="/admin/auth" element={<PortalAuth portalType="admin" allowedRoles={ADMIN_AUTH_ROLES} />} />
+        <Route path="/staff/auth" element={<PortalAuth portalType="staff" allowedRoles={STAFF_AUTH_ROLES} />} />
+        <Route path="/fee/auth" element={<PortalAuth portalType="fee" allowedRoles={FEE_AUTH_ROLES} />} />
 
-      {mode === "combined" && (
-        <>
-          <Route path="/dashboard" element={<PortalRedirect path="/dashboard" />} />
-          <Route path="/students" element={<PortalRedirect path="/students" />} />
-          <Route path="/notices" element={<PortalRedirect path="/notices" />} />
-          <Route path="/profile" element={<PortalRedirect path="/profile" />} />
-          <Route path="/attendance" element={<PortalRedirect path="/attendance" />} />
-          <Route path="/homework" element={<PortalRedirect path="/homework" />} />
-          <Route path="/schedule" element={<PortalRedirect path="/schedule" />} />
-          <Route path="/reports" element={<PortalRedirect path="/reports" />} />
-          <Route path="/users" element={<PortalRedirect path="/users" />} />
-          <Route path="/fee-structure" element={<PortalRedirect path="/fee-structure" />} />
-          <Route path="/time-table" element={<PortalRedirect path="/time-table" />} />
-          <Route path="/academic-calendar" element={<PortalRedirect path="/academic-calendar" />} />
-          <Route path="/audit" element={<PortalRedirect path="/audit" />} />
-          <Route path="/fee-analytics" element={<PortalRedirect path="/fee-analytics" />} />
-          <Route path="/settings" element={<PortalRedirect path="/settings" />} />
-          <Route path="/staff-login" element={<PortalRedirect path="/staff-login" />} />
-          <Route path="/fee" element={<Navigate to="/fee/dashboard" replace />} />
-          <Route path="/course-fees" element={<PortalRedirect path="/course-fees" />} />
-          <Route path="/books-fees" element={<PortalRedirect path="/books-fees" />} />
-          <Route path="/transport-fees" element={<PortalRedirect path="/transport-fees" />} />
-          <Route path="/fee-history" element={<PortalRedirect path="/fee-history" />} />
-          <Route path="/pending-fees" element={<PortalRedirect path="/pending-fees" />} />
-          <Route path="/accessories" element={<PortalRedirect path="/accessories" />} />
-          <Route path="/accessories/history" element={<PortalRedirect path="/accessories/history" />} />
-          <Route path="/accessories/uniform" element={<PortalRedirect path="/accessories/uniform" />} />
-          <Route path="/accessories/uniform/inventory" element={<PortalRedirect path="/accessories/uniform/inventory" />} />
-          <Route path="/sms" element={<PortalRedirect path="/sms" />} />
-          <Route path="/receipt" element={<PortalRedirect path="/receipt" />} />
-          <Route path="/db-check" element={<PortalRedirect path="/db-check" />} />
-          <Route path="/schema-check" element={<PortalRedirect path="/schema-check" />} />
-        </>
-      )}
-
-      {portalRoutes
-        .filter((route) => route.portals.some((portalType) => allowedPortals.includes(portalType)))
-        .flatMap((route) =>
-          mode === "combined"
-            ? route.portals
-                .filter((portalType) => allowedPortals.includes(portalType))
-                .map((portalType) => (
-                  <Route
-                    key={`${portalType}${route.path}`}
-                    path={portalPath(portalType, route.path)}
-                    element={<ProtectedRoute mode={mode}>{route.element}</ProtectedRoute>}
-                  />
-                ))
-            : [
-                <Route
-                  key={route.path}
-                  path={route.path}
-                  element={<ProtectedRoute mode={mode}>{route.element}</ProtectedRoute>}
-                />,
-              ]
+        {/* Shared Root Redirects for Combined Mode */}
+        {mode === "combined" && (
+          <>
+            <Route path="/dashboard" element={<PortalRedirect path="/dashboard" />} />
+            <Route path="/students" element={<PortalRedirect path="/students" />} />
+            <Route path="/notices" element={<PortalRedirect path="/notices" />} />
+            <Route path="/settings" element={<PortalRedirect path="/settings" />} />
+            <Route path="/profile" element={<PortalRedirect path="/profile" />} />
+          </>
         )}
 
-      {mode === "combined" ? (
-        <>
-          <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
-          <Route path="/staff" element={<Navigate to="/staff/dashboard" replace />} />
-          <Route path="/admin/*" element={<Navigate to="/admin/dashboard" replace />} />
-          <Route path="/staff/*" element={<Navigate to="/staff/dashboard" replace />} />
-        </>
-      ) : (
-        <Route path="*" element={<NotFound />} />
-      )}
+        {mode === "admin" && <Route path="/admin.html" element={<Navigate to="/" replace />} />}
+        {mode === "staff" && <Route path="/staff.html" element={<Navigate to="/" replace />} />}
+        {mode === "fee" && <Route path="/fee.html" element={<Navigate to="/" replace />} />}
 
-      {mode === "combined" && <Route path="*" element={<NotFound />} />}
+        {/* Dynamic Portal Routes - Generate ALL routes for ALL portals to prevent 404s */}
+        {portalRoutes.flatMap((route) => {
+          const routes = [];
+          
+          // Generate routes for each portal this page belongs to
+          route.portals.forEach(p => {
+            const prefix = getPortalBasePath(p);
+            
+            // 1. Prefixed path (e.g. /admin/dashboard, /staff/dashboard)
+            routes.push(
+              <Route
+                key={`${p}${route.path}`}
+                path={`${prefix}${route.path.startsWith("/") ? route.path : `/${route.path}`}`}
+                element={<ProtectedRoute mode={mode}>{route.element}</ProtectedRoute>}
+              />
+            );
+
+            // 2. Short path (e.g. /dashboard) - only for the current build mode's portal
+            // Or if in combined mode, we'll handle this via redirects (already handled above)
+            const activePortal = getPortalFromRole(userRole);
+            if (p === mode || (mode === "combined" && p === activePortal)) {
+              routes.push(
+                <Route
+                  key={`short-${p}-${route.path}`}
+                  path={route.path}
+                  element={<ProtectedRoute mode={mode}>{route.element}</ProtectedRoute>}
+                />
+              );
+            }
+          });
+          
+          return routes;
+        })}
+
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>
   );
@@ -348,7 +346,7 @@ export function AppShell({ mode = "combined" }: AppShellProps) {
           <TooltipProvider>
             <Toaster />
             <Sonner />
-            <BrowserRouter>
+            <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
               <AppRoutes mode={mode} />
             </BrowserRouter>
           </TooltipProvider>
@@ -358,6 +356,6 @@ export function AppShell({ mode = "combined" }: AppShellProps) {
   );
 }
 
-const App = () => <AppShell />;
+const App = ({ portal }: { portal?: AppMode }) => <AppShell mode={portal} />;
 
 export default App;

@@ -334,15 +334,18 @@ export default function AccessoryIssue() {
                                         </div>
                                         <div className="space-y-2">
                                             <Label htmlFor="price">Unit Price (₹)</Label>
-                                            <Input
-                                                id="price"
-                                                name="price"
-                                                type="number"
-                                                min="0"
-                                                required
-                                                value={formData.price}
-                                                onChange={handleInputChange}
-                                            />
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span>
+                                                <Input
+                                                    id="price"
+                                                    name="price"
+                                                    type="number"
+                                                    className="pl-7 font-semibold"
+                                                    value={formData.price}
+                                                    onChange={handleInputChange}
+                                                    required
+                                                />
+                                            </div>
                                         </div>
                                         <div className="space-y-2">
                                             <Label>Subtotal</Label>

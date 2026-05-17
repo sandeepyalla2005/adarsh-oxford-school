@@ -75,7 +75,7 @@ export default function Receipt() {
                 particulars: particulars,
                 totalAmount: totalAmount,
                 paymentMode: record.payment_method || 'Cash',
-                narration: `Fees for ${type === 'course' ? `Term ${record.term}` : type || 'receipt'}`
+                narration: `Fees for ${type === 'course' ? (record.term === 0 ? 'OLD DUE' : `Term ${record.term}`) : type || 'receipt'}`
             };
 
             setData(receiptDataObj);
@@ -88,7 +88,7 @@ export default function Receipt() {
     };
 
     const getParticularsName = (type: string | null, data: any) => {
-        if (type === 'course') return `COURSE FEE (Term ${data.term})`;
+        if (type === 'course') return `COURSE FEE (${data.term === 0 ? 'OLD DUE' : `Term ${data.term}`})`;
         if (type === 'books') return `BOOKS & ACCESSORIES`;
         if (type === 'transport') return `TRANSPORT FEE (${data.month ? new Date(0, data.month - 1).toLocaleString('default', { month: 'long' }) : 'Monthly'})`;
         if (type === 'accessories') return `ACCESSORY: ${data.accessory_categories?.name || 'FEE'}`;

@@ -56,7 +56,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background relative flex overflow-hidden">
+    <div className="min-h-screen bg-background relative flex overflow-hidden print:overflow-visible print:bg-white">
       {/* Mobile Overlay */}
       {isSidebarOpen && (
         <div
@@ -66,21 +66,26 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       )}
 
       {/* Sidebar */}
-      <div className={`fixed inset-y-0 left-0 z-40 transition-all duration-300 transform lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0 w-[260px]' : '-translate-x-full lg:w-[260px]'}`}>
+      <div className={`print:hidden fixed inset-y-0 left-0 z-40 transition-all duration-300 transform lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0 w-[260px]' : '-translate-x-full lg:w-[260px]'}`}>
         <AppSidebar onClose={() => setIsSidebarOpen(false)} />
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 lg:pl-[260px] h-screen relative z-10">
+      <div className="flex-1 flex flex-col min-w-0 lg:pl-[260px] print:pl-0 h-screen print:h-auto relative z-10">
         {/* Mobile Header */}
-        <header className="lg:hidden flex h-20 items-center justify-between border-b bg-white px-4 shrink-0 shadow-sm z-20">
-          <div className="flex items-center gap-3">
-            <div className="h-14 w-14 flex items-center justify-center rounded-xl bg-white shadow-md border border-slate-100 overflow-hidden shrink-0">
-              <img src="/school-logo-official.png" alt="School Logo" className="h-full w-full object-cover" />
+        <header className="print:hidden lg:hidden flex h-24 items-center justify-between border-b bg-white px-4 shrink-0 shadow-sm z-20">
+          <div className="flex items-center gap-4">
+            <div className="flex flex-col items-center">
+              <span className="text-[6px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">
+                A Way and a Vision
+              </span>
+              <div className="h-12 w-12 flex items-center justify-center rounded-lg bg-white shadow-sm border border-slate-100 overflow-hidden shrink-0">
+                <img src="/school-logo-official.png" alt="School Logo" className="h-full w-full object-contain" />
+              </div>
             </div>
-            <div className="flex flex-col">
-              <span className="font-black text-primary text-[18px] leading-none tracking-tight">ADARSH OXFORD</span>
-              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1">Management System</span>
+            <div className="flex flex-col leading-[0.85]">
+              <span className="text-[18px] font-black text-slate-900 tracking-tighter">Oxford</span>
+              <span className="text-[18px] font-medium text-red-600 tracking-tight">School</span>
             </div>
           </div>
           <Button
@@ -93,7 +98,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           </Button>
         </header>
 
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8 scroll-smooth -webkit-overflow-scrolling-touch">
+        <main className="flex-1 overflow-y-auto print:overflow-visible overflow-x-hidden print:overflow-x-visible p-4 md:p-8 print:p-0 scroll-smooth -webkit-overflow-scrolling-touch">
           <div className="mx-auto max-w-7xl">
             {children}
           </div>

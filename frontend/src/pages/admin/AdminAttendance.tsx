@@ -44,7 +44,7 @@ const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; i
 
 export default function AdminAttendance() {
     const { userRole } = useAuth();
-    const isAdmin = userRole === 'admin';
+    const isAdmin = userRole === 'admin' || userRole === 'feeInCharge';
     const [filterClass, setFilterClass] = useState<string>('All');
     const [filterDate, setFilterDate] = useState(new Date().toISOString().split('T')[0]);
     const [records, setRecords] = useState<AttendanceRecord[]>([]);

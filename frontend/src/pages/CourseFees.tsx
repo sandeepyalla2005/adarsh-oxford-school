@@ -77,6 +77,7 @@ interface StudentFeeData extends Student {
   term1Paid: number;
   term2Paid: number;
   term3Paid: number;
+  oldDuesPaid: number;
   pendingFee: number;
 }
 
@@ -165,6 +166,9 @@ export default function CourseFees() {
         const term3Paid = studentPayments
           .filter(p => p.term === 3)
           .reduce((sum, p) => sum + p.amount_paid, 0);
+        const oldDuesPaid = studentPayments
+          .filter(p => p.term === 0)
+          .reduce((sum, p) => sum + p.amount_paid, 0);
 
         // Use student's own fees
         const term1Fee = Number(student.term1_fee) || 0;
@@ -173,7 +177,7 @@ export default function CourseFees() {
         const oldDues = Number(student.old_dues) || 0;
 
         const totalFee = term1Fee + term2Fee + term3Fee + oldDues;
-        const totalPaid = term1Paid + term2Paid + term3Paid;
+        const totalPaid = term1Paid + term2Paid + term3Paid + oldDuesPaid;
 
         return {
           ...student,
@@ -185,6 +189,7 @@ export default function CourseFees() {
           term1Paid,
           term2Paid,
           term3Paid,
+          oldDuesPaid,
           pendingFee: totalFee - totalPaid,
         };
       });
@@ -217,23 +222,32 @@ export default function CourseFees() {
     try {
       const receiptNumber = `RCP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-      const { error } = await supabase
-        .from('course_payments')
-        .insert({
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/payments/collect`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`,
+        },
+        body: JSON.stringify({
           student_id: selectedStudent.id,
+          type: 'course',
           academic_year: academicYear,
+          amount: parseFloat(paymentAmount),
+          method: paymentMethod,
           term: parseInt(selectedTerm),
-          amount_paid: parseFloat(paymentAmount),
-          payment_method: paymentMethod,
           receipt_number: receiptNumber,
-          collected_by: user.id,
-        });
+        }),
+      });
 
-      if (error) throw error;
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to record payment');
+      }
 
       toast({
         title: 'Payment Recorded',
-        description: `Receipt: ${receiptNumber}`,
+        description: `Receipt: ${receiptNumber}. Notifications sent.`,
       });
 
       setPaymentDialogOpen(false);
@@ -307,12 +321,16 @@ export default function CourseFees() {
       ? selectedStudent.term1_fee
       : term === 2
         ? selectedStudent.term2_fee
-        : selectedStudent.term3_fee;
+        : term === 3
+          ? selectedStudent.term3_fee
+          : selectedStudent.old_dues;
     const termPaid = term === 1
       ? selectedStudent.term1Paid
       : term === 2
         ? selectedStudent.term2Paid
-        : selectedStudent.term3Paid;
+        : term === 3
+          ? selectedStudent.term3Paid
+          : selectedStudent.oldDuesPaid;
     return Math.max(0, termFee - termPaid);
   };
 
@@ -453,37 +471,58 @@ export default function CourseFees() {
                             {formatCurrency(student.totalFee)}
                           </TableCell>
                           <TableCell className="text-center">
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                getTermStatus(student.term1Paid, student.term1_fee) === 'success' && 'badge-success',
-                                getTermStatus(student.term1Paid, student.term1_fee) === 'warning' && 'badge-warning'
+                            <div className="flex flex-col items-center gap-1.5 min-w-[80px]">
+                              <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">Total: {formatCurrency(student.term1_fee)}</span>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "w-full justify-center",
+                                  getTermStatus(student.term1Paid, student.term1_fee) === 'success' && 'badge-success',
+                                  getTermStatus(student.term1Paid, student.term1_fee) === 'warning' && 'badge-warning'
+                                )}
+                              >
+                                {formatCurrency(student.term1Paid)}
+                              </Badge>
+                              {student.term1_fee - student.term1Paid > 0 && (
+                                <span className="text-[10px] text-destructive font-bold uppercase tracking-tight">Due: {formatCurrency(student.term1_fee - student.term1Paid)}</span>
                               )}
-                            >
-                              {formatCurrency(student.term1Paid)}
-                            </Badge>
+                            </div>
                           </TableCell>
                           <TableCell className="text-center">
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                getTermStatus(student.term2Paid, student.term2_fee) === 'success' && 'badge-success',
-                                getTermStatus(student.term2Paid, student.term2_fee) === 'warning' && 'badge-warning'
+                            <div className="flex flex-col items-center gap-1.5 min-w-[80px]">
+                              <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">Total: {formatCurrency(student.term2_fee)}</span>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "w-full justify-center",
+                                  getTermStatus(student.term2Paid, student.term2_fee) === 'success' && 'badge-success',
+                                  getTermStatus(student.term2Paid, student.term2_fee) === 'warning' && 'badge-warning'
+                                )}
+                              >
+                                {formatCurrency(student.term2Paid)}
+                              </Badge>
+                              {student.term2_fee - student.term2Paid > 0 && (
+                                <span className="text-[10px] text-destructive font-bold uppercase tracking-tight">Due: {formatCurrency(student.term2_fee - student.term2Paid)}</span>
                               )}
-                            >
-                              {formatCurrency(student.term2Paid)}
-                            </Badge>
+                            </div>
                           </TableCell>
                           <TableCell className="text-center">
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                getTermStatus(student.term3Paid, student.term3_fee) === 'success' && 'badge-success',
-                                getTermStatus(student.term3Paid, student.term3_fee) === 'warning' && 'badge-warning'
+                            <div className="flex flex-col items-center gap-1.5 min-w-[80px]">
+                              <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">Total: {formatCurrency(student.term3_fee)}</span>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "w-full justify-center",
+                                  getTermStatus(student.term3Paid, student.term3_fee) === 'success' && 'badge-success',
+                                  getTermStatus(student.term3Paid, student.term3_fee) === 'warning' && 'badge-warning'
+                                )}
+                              >
+                                {formatCurrency(student.term3Paid)}
+                              </Badge>
+                              {student.term3_fee - student.term3Paid > 0 && (
+                                <span className="text-[10px] text-destructive font-bold uppercase tracking-tight">Due: {formatCurrency(student.term3_fee - student.term3Paid)}</span>
                               )}
-                            >
-                              {formatCurrency(student.term3Paid)}
-                            </Badge>
+                            </div>
                           </TableCell>
                           <TableCell className="text-right">
                             <span className={cn(
@@ -547,6 +586,7 @@ export default function CourseFees() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="0">Old Due</SelectItem>
                       <SelectItem value="1">Term 1</SelectItem>
                       <SelectItem value="2">Term 2</SelectItem>
                       <SelectItem value="3">Term 3</SelectItem>

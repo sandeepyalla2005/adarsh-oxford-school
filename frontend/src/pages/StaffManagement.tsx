@@ -20,7 +20,9 @@ import {
     UserCheck,
     Upload,
     UserCog,
-    MapPin
+    MapPin,
+    AlertTriangle,
+    Loader2
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -96,6 +98,13 @@ export default function StaffManagement() {
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
     const [editingStaff, setEditingStaff] = useState<Staff | null>(null);
+
+    const [wipeOtp, setWipeOtp] = useState('');
+    const [isRequestingOtp, setIsRequestingOtp] = useState(false);
+    const [showOtpInput, setShowOtpInput] = useState(false);
+    const [isRemoving, setIsRemoving] = useState(false);
+    const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [photoFile, setPhotoFile] = useState<File | null>(null);
 
@@ -289,9 +298,57 @@ export default function StaffManagement() {
         }
     };
 
+    const handleRequestWipeOtp = async () => {
+        setIsRequestingOtp(true);
+        try {
+            const resp = await apiFetch('/api/auth/request-wipe', { 
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ operation: 'staff' })
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || 'Failed to request OTP');
+            setShowOtpInput(true);
+            toast.success('🔐 OTP Sent to Administrator');
+        } catch (err: any) {
+            toast.error('OTP Error: ' + err.message);
+        } finally {
+            setIsRequestingOtp(false);
+        }
+    };
+
     const handleClearAllStaff = () => {
-        if (confirm("Are you sure? This will remove ALL staff profiles and access roles.")) {
-            clearAllStaffMutation.mutate();
+        setShowRemoveConfirm(true);
+    };
+
+    const confirmStaffWipe = async () => {
+        if (!wipeOtp || wipeOtp.length !== 6) {
+            toast.error('Please enter the 6-digit code');
+            return;
+        }
+
+        setIsRemoving(true);
+        try {
+            const resp = await apiFetch('/api/staff/wipe-all', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ otp: wipeOtp })
+            });
+
+            if (!resp.ok) {
+                const data = await resp.json();
+                throw new Error(data.detail || 'Wipe failed');
+            }
+
+            toast.success('🗑️ All staff instances removed');
+            setShowRemoveConfirm(false);
+            setShowOtpInput(false);
+            setWipeOtp('');
+            queryClient.invalidateQueries({ queryKey: ['staff-profiles'] });
+        } catch (err: any) {
+            toast.error('Wipe Failed: ' + err.message);
+        } finally {
+            setIsRemoving(false);
         }
     };
 
@@ -477,6 +534,56 @@ export default function StaffManagement() {
                         </Button>
                     </div>
                 </div>
+
+                {/* Staff Wipe Confirmation Dialog */}
+                <Dialog open={showRemoveConfirm} onOpenChange={setShowRemoveConfirm}>
+                    <DialogContent className="sm:max-w-md rounded-[2rem] border-none shadow-2xl p-0 overflow-hidden">
+                        <div className="bg-red-600 p-8 text-white text-center">
+                            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/20 backdrop-blur-md mx-auto mb-4">
+                                <AlertTriangle className="h-10 w-10 text-white" />
+                            </div>
+                            <DialogTitle className="text-2xl font-bold">Remove All Staff?</DialogTitle>
+                            <DialogDescription className="text-white/80 mt-2">
+                                This is a high-privilege destructive action.
+                            </DialogDescription>
+                        </div>
+
+                        <div className="p-8 space-y-6 bg-white">
+                            <p className="text-slate-600 text-center font-medium">
+                                You are about to permanently delete all staff profiles and system access roles. 
+                                <span className="block font-bold text-red-600 mt-2">Admin OTP confirmation is required.</span>
+                            </p>
+
+                            {showOtpInput ? (
+                                <div className="space-y-4">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 text-center block">Verification Code</label>
+                                        <Input
+                                            maxLength={6}
+                                            value={wipeOtp}
+                                            onChange={(e) => setWipeOtp(e.target.value.replace(/\D/g, ''))}
+                                            placeholder="000000"
+                                            className="h-16 rounded-2xl border-2 border-slate-100 bg-slate-50 text-center text-3xl font-black tracking-[0.5em] text-[#002147] focus:border-red-200 transition-all"
+                                        />
+                                    </div>
+                                    <div className="flex gap-3">
+                                        <Button variant="outline" onClick={() => setShowOtpInput(false)} className="flex-1 h-14 rounded-2xl font-bold">Back</Button>
+                                        <Button onClick={confirmStaffWipe} disabled={isRemoving || wipeOtp.length !== 6} className="flex-1 h-14 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-bold active:scale-95">
+                                            {isRemoving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Confirm Wipe"}
+                                        </Button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="flex gap-3">
+                                    <Button variant="outline" onClick={() => setShowRemoveConfirm(false)} className="flex-1 h-14 rounded-2xl font-bold">Cancel</Button>
+                                    <Button onClick={handleRequestWipeOtp} disabled={isRequestingOtp} className="flex-1 h-14 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-bold active:scale-95">
+                                        {isRequestingOtp ? <Loader2 className="h-5 w-5 animate-spin" /> : "Get Wipe OTP"}
+                                    </Button>
+                                </div>
+                            )}
+                        </div>
+                    </DialogContent>
+                </Dialog>
 
                 <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                     <Card className="lg:col-span-3 border-none shadow-xl rounded-[2.5rem] bg-white overflow-hidden">

@@ -81,7 +81,7 @@ type Student = {
     address?: string;
     is_active?: boolean;
     created_at?: string;
-    status?: 'active' | 'dropout' | 'graduated';
+    status?: 'active' | 'dropout' | 'graduated' | 'dropout_pending';
     dropout_reason?: string | null;
     dropout_date?: string | null;
     term1_fee?: number;
@@ -106,7 +106,7 @@ export default function ClassStudents() {
     const { isAdmin, isStaff, userRole, user, profile } = useAuth();
     const { toast } = useToast();
 
-    const isFeeAdmin = isAdmin; // Only admin can manage students
+    const isFeeAdmin = isAdmin || userRole === 'feeInCharge'; // Allow both admin and fee in-charge to manage students
     const canViewHistory = isAdmin || userRole === 'feeInCharge';
 
     const [searchQuery, setSearchQuery] = useState('');
@@ -119,7 +119,7 @@ export default function ClassStudents() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isMarkingDropout, setIsMarkingDropout] = useState(false);
     const [isDeletingDropout, setIsDeletingDropout] = useState(false);
-    const [statusFilter, setStatusFilter] = useState<'active' | 'dropout' | 'all'>('active');
+    const [statusFilter, setStatusFilter] = useState<'active' | 'dropout' | 'trash' | 'all'>('active');
     const [isRemoving, setIsRemoving] = useState(false);
     const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
     const [showHistoryDialog, setShowHistoryDialog] = useState(false);
@@ -156,6 +156,46 @@ export default function ClassStudents() {
 
     const [photoPreview, setPhotoPreview] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const handleApproveDropout = async (student: Student) => {
+        if (!isAdmin || !student?.id) return;
+        setIsSubmitting(true);
+        try {
+            const resp = await apiFetch(`/api/students/approve-dropout/${student.id}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || 'Approval failed');
+            toast({ title: 'Approved', description: data.message });
+            fetchStudents();
+            setSelectedStudent(null);
+        } catch (e: any) {
+            toast({ variant: 'destructive', title: 'Error', description: e.message });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleRejectDropout = async (student: Student) => {
+        if (!isAdmin || !student?.id) return;
+        setIsSubmitting(true);
+        try {
+            const resp = await apiFetch(`/api/students/reject-dropout/${student.id}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || 'Rejection failed');
+            toast({ title: 'Rejected', description: data.message });
+            fetchStudents();
+            setSelectedStudent(null);
+        } catch (e: any) {
+            toast({ variant: 'destructive', title: 'Error', description: e.message });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
 
     useEffect(() => {
         setIsLoading(true);
@@ -253,8 +293,15 @@ export default function ClassStudents() {
 
     const enrichedStudents = students.filter((student) => {
         const studentStatus = student.status || (student.is_active ? 'active' : 'dropout');
-        if (statusFilter === 'active' && studentStatus !== 'active') return false;
-        if (statusFilter === 'dropout' && studentStatus !== 'dropout') return false;
+        const isPendingDeletion = student.dropout_reason === 'DELETED_PENDING_PURGE';
+
+        if (statusFilter === 'trash') {
+            if (!isPendingDeletion) return false;
+        } else {
+            if (isPendingDeletion) return false;
+            if (statusFilter === 'active' && studentStatus !== 'active' && studentStatus !== 'dropout_pending') return false;
+            if (statusFilter === 'dropout' && studentStatus !== 'dropout') return false;
+        }
 
         // We trust the backend to return students for the correct class, 
         // as the className comparison here is prone to case-sensitivity issues.
@@ -926,35 +973,47 @@ export default function ClassStudents() {
     };
 
     const handleMarkDropout = async (student: Student) => {
-        // ... copy logic
         if (!student?.id) return;
         const reason = window.prompt('Reason for dropout:');
         if (reason === null) return; // Cancelled
 
         setIsMarkingDropout(true);
         try {
-            // Log status change before updating
-            await logStudentAction({
-                studentId: student.id as string,
-                studentName: student.full_name || student.name || '',
-                actionType: 'UPDATE',
-                moduleName: 'Student Info',
-                oldValues: { status: student.status, is_active: student.is_active },
-                newValues: { status: 'dropout', is_active: false, dropout_reason: reason },
-                performedBy: user?.id || '',
-                performedByName: profile?.full_name || 'Admin',
-                role: userRole || 'admin'
-            });
+            if (isAdmin) {
+                // Admin can mark directly
+                await logStudentAction({
+                    studentId: student.id as string,
+                    studentName: student.full_name || student.name || '',
+                    actionType: 'UPDATE',
+                    moduleName: 'Student Info',
+                    oldValues: { status: student.status, is_active: student.is_active },
+                    newValues: { status: 'dropout', is_active: false, dropout_reason: reason },
+                    performedBy: user?.id || '',
+                    performedByName: profile?.full_name || 'Admin',
+                    role: userRole || 'admin'
+                });
 
-            const { error } = await supabase.from('students').update({
-                is_active: false,
-                status: 'dropout',
-                dropout_reason: reason,
-                dropout_date: new Date().toISOString()
-            }).eq('id', student.id);
-            if (error) throw error;
-            toast({ title: 'Success', description: 'Student marked as dropout.' });
+                const { error } = await supabase.from('students').update({
+                    is_active: false,
+                    status: 'dropout',
+                    dropout_reason: reason,
+                    dropout_date: new Date().toISOString()
+                }).eq('id', student.id);
+                if (error) throw error;
+                toast({ title: 'Success', description: 'Student marked as dropout.' });
+            } else {
+                // Fee In Charge requests dropout via backend
+                const resp = await apiFetch('/api/students/request-dropout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ student_id: student.id, reason })
+                });
+                const data = await resp.json();
+                if (!resp.ok) throw new Error(data.detail || 'Request failed');
+                toast({ title: 'Request Sent', description: 'Dropout request submitted for Admin approval.' });
+            }
             fetchStudents();
+            setSelectedStudent(null);
         } catch (e: any) {
             toast({ variant: 'destructive', title: 'Error', description: e.message });
         } finally {
@@ -968,7 +1027,7 @@ export default function ClassStudents() {
         if (!confirm('Permanently delete?')) return;
         setIsDeletingDropout(true);
         try {
-            // Log deletion before removing
+            // Log soft deletion
             await logStudentAction({
                 studentId: student.id as string,
                 studentName: student.full_name || student.name || '',
@@ -980,14 +1039,49 @@ export default function ClassStudents() {
                 role: userRole || 'admin'
             });
 
-            const { error } = await supabase.from('students').delete().eq('id', student.id);
+            // Update status to mark for 15-day auto-delete
+            const { error } = await supabase
+                .from('students')
+                .update({ 
+                    status: 'dropout', 
+                    is_active: false, 
+                    dropout_reason: 'DELETED_PENDING_PURGE',
+                    dropout_date: new Date().toISOString() 
+                })
+                .eq('id', student.id);
+                
             if (error) throw error;
-            toast({ title: 'Deleted', description: 'Student deleted.' });
+            toast({ title: 'Removed', description: 'Student moved to deletion queue (15-day retention).' });
             fetchStudents();
         } catch (e: any) {
             toast({ variant: 'destructive', title: 'Error', description: e.message });
         } finally {
             setIsDeletingDropout(false);
+        }
+    };
+
+    const handleRestoreStudent = async (student: Student) => {
+        if (!isAdmin) return;
+        setIsSubmitting(true);
+        try {
+            const { error } = await supabase
+                .from('students')
+                .update({
+                    is_active: true,
+                    status: 'active',
+                    dropout_reason: null,
+                    dropout_date: null
+                })
+                .eq('id', student.id);
+
+            if (error) throw error;
+            toast({ title: 'Restored', description: `${getStudentName(student)} has been restored to active status.` });
+            fetchStudents();
+            setSelectedStudent(null);
+        } catch (e: any) {
+            toast({ variant: 'destructive', title: 'Restore Failed', description: e.message });
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -1013,17 +1107,31 @@ export default function ClassStudents() {
         setShowRemoveConfirm(false);
         try {
             if (className === 'all') {
-                // Delete ALL students
-                const { error } = await supabase.from('students').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+                // Soft delete ALL students
+                const { error } = await supabase.from('students')
+                    .update({ 
+                        status: 'dropout', 
+                        is_active: false, 
+                        dropout_reason: 'DELETED_PENDING_PURGE',
+                        dropout_date: new Date().toISOString()
+                    })
+                    .neq('id', '00000000-0000-0000-0000-000000000000');
                 if (error) throw error;
             } else {
-                // Delete students only in this class
+                // Soft delete students only in this class
                 const classObj = classes.find(c => c.name.toLowerCase() === className.toLowerCase());
                 if (!classObj) throw new Error('Class not found');
-                const { error } = await supabase.from('students').delete().eq('class_id', classObj.id);
+                const { error } = await supabase.from('students')
+                    .update({ 
+                        status: 'dropout', 
+                        is_active: false, 
+                        dropout_reason: 'DELETED_PENDING_PURGE',
+                        dropout_date: new Date().toISOString()
+                    })
+                    .eq('class_id', classObj.id);
                 if (error) throw error;
             }
-            toast({ title: '🗑️ Students Removed', description: `All students in ${className === 'all' ? 'all classes' : className} have been deleted.` });
+            toast({ title: 'Removed', description: `Students moved to deletion queue (15-day retention policy).` });
             fetchStudents();
         } catch (e: any) {
             toast({ variant: 'destructive', title: 'Delete Failed', description: e.message || 'Could not remove students.' });
@@ -1354,6 +1462,9 @@ export default function ClassStudents() {
                         <div className="flex items-center gap-2">
                             <Button variant={statusFilter === 'active' ? 'default' : 'outline'} size="sm" onClick={() => setStatusFilter('active')}>Active</Button>
                             <Button variant={statusFilter === 'dropout' ? 'default' : 'outline'} size="sm" onClick={() => setStatusFilter('dropout')}>Dropouts</Button>
+                            <Button variant={statusFilter === 'trash' ? 'default' : 'destructive'} size="sm" onClick={() => setStatusFilter('trash')} className={statusFilter === 'trash' ? '' : 'border-red-200 text-red-600 hover:bg-red-50'}>
+                                <Trash2 className="h-3.5 w-3.5 mr-1" /> Trash
+                            </Button>
                             <Button variant={statusFilter === 'all' ? 'default' : 'outline'} size="sm" onClick={() => setStatusFilter('all')}>All</Button>
                         </div>
                     </div>
@@ -1488,16 +1599,64 @@ export default function ClassStudents() {
                                                 <div className="flex justify-between"><span className="text-muted-foreground">Joining Date</span><span className="font-medium">{selectedStudent.joining_date || '-'}</span></div>
                                             </div>
                                             <div className="flex flex-wrap gap-2 pt-4">
-                                                <Button variant="outline" className="flex-1" onClick={() => openEditDialog(selectedStudent)} disabled={!isAdmin}><Edit2 className="mr-2 h-4 w-4" />Edit</Button>
-                                                <Button variant="destructive" className="flex-1" onClick={() => handleMarkDropout(selectedStudent)} disabled={!isAdmin}>Mark Dropout</Button>
-                                                <Button
-                                                    variant="outline"
-                                                    className="w-full gap-2 border-slate-200 mt-2 hover:bg-slate-50 text-[#002147] font-bold"
-                                                    onClick={() => setShowProfileDialog(true)}
-                                                >
-                                                    <User className="h-4 w-4" />
-                                                    View Full Profile
-                                                </Button>
+                                                {selectedStudent.dropout_reason === 'DELETED_PENDING_PURGE' ? (
+                                                    <div className="w-full space-y-4">
+                                                        <div className="bg-red-50 border border-red-100 rounded-xl p-4 flex items-start gap-3">
+                                                            <AlertTriangle className="h-5 w-5 text-red-500 shrink-0 mt-0.5" />
+                                                            <div>
+                                                                <p className="text-sm font-bold text-red-800">Pending Permanent Deletion</p>
+                                                            </div>
+                                                        </div>
+                                                        <Button 
+                                                            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl"
+                                                            onClick={() => handleRestoreStudent(selectedStudent)}
+                                                            disabled={isSubmitting}
+                                                        >
+                                                            Restore Student Record
+                                                        </Button>
+                                                    </div>
+                                                ) : selectedStudent.status === 'dropout_pending' ? (
+                                                    <div className="w-full space-y-4">
+                                                        <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
+                                                            <p className="text-sm font-bold text-amber-800">Dropout Requested</p>
+                                                            <p className="text-xs text-amber-600 mt-1">{selectedStudent.dropout_reason}</p>
+                                                        </div>
+                                                        {isAdmin ? (
+                                                            <div className="flex gap-2">
+                                                                <Button 
+                                                                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl"
+                                                                    onClick={() => handleApproveDropout(selectedStudent)}
+                                                                    disabled={isSubmitting}
+                                                                >
+                                                                    Approve
+                                                                </Button>
+                                                                <Button 
+                                                                    variant="outline"
+                                                                    className="flex-1 border-red-200 text-red-600 hover:bg-red-50 rounded-xl font-bold"
+                                                                    onClick={() => handleRejectDropout(selectedStudent)}
+                                                                    disabled={isSubmitting}
+                                                                >
+                                                                    Reject
+                                                                </Button>
+                                                            </div>
+                                                        ) : (
+                                                            <p className="text-center text-xs text-slate-400 italic">Waiting for Admin approval...</p>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <>
+                                                        <Button variant="outline" className="flex-1" onClick={() => openEditDialog(selectedStudent)} disabled={!isFeeAdmin}><Edit2 className="mr-2 h-4 w-4" />Edit</Button>
+                                                        <Button variant="destructive" className="flex-1" onClick={() => handleMarkDropout(selectedStudent)} disabled={!isFeeAdmin}>Mark Dropout</Button>
+                                                        <Button
+                                                            variant="outline"
+                                                            className="w-full gap-2 border-slate-200 mt-2 hover:bg-slate-50 text-[#002147] font-bold"
+                                                            onClick={() => setShowProfileDialog(true)}
+                                                        >
+                                                            <User className="h-4 w-4" />
+                                                            View Full Profile
+                                                        </Button>
+                                                    </>
+                                                )}
                                             </div>
                                         </div>
                                     ) : (

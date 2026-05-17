@@ -13,17 +13,23 @@ export function getAppBuildMode(): AppBuildMode {
     return PORTAL_MODE;
   }
 
-  // 2. Fallback to DOM attribute (available after <body> parses)
-  if (typeof document === "undefined") {
-    return "combined";
+  // 2. Check URL path as a primary hint (e.g. /admin/dashboard)
+  if (typeof window !== "undefined") {
+    const path = window.location.pathname;
+    if (path.startsWith("/admin")) return "admin";
+    if (path.startsWith("/staff")) return "staff";
+    if (path.startsWith("/fee")) return "fee";
   }
 
-  const value = document.body?.dataset?.portalBuild;
-  if (value === "admin" || value === "staff" || value === "fee") {
-    return value;
+  // 3. Fallback to DOM attribute (available after <body> parses)
+  if (typeof document !== "undefined") {
+    const value = document.body?.dataset?.portalBuild;
+    if (value === "admin" || value === "staff" || value === "fee") {
+      return value;
+    }
   }
 
-  // 3. Ultimate Fallback: Port Detection (Definitive on localhost)
+  // 4. Ultimate Fallback: Port Detection (Definitive on localhost)
   const port = typeof window !== "undefined" ? window.location.port : "";
   if (port === "8080") return "admin";
   if (port === "8081") return "staff";
@@ -69,12 +75,7 @@ export function getPortalBasePath(portal: PortalType): string {
 
 export function portalPath(portal: PortalType, path: string): string {
   const normalized = normalizePath(path);
-  const buildMode = getAppBuildMode();
-
-  if (buildMode === portal) {
-    return normalized;
-  }
-
+  // Always include the prefix to preserve portal context on refresh
   return `${getPortalBasePath(portal)}${normalized}`;
 }
 
@@ -87,11 +88,6 @@ export function getAuthRedirectPath(): string {
 }
 
 export function getPortalAuthPath(portal: PortalType): string {
-  const buildMode = getAppBuildMode();
-  if (buildMode === portal) {
-    return "/auth";
-  }
-
   return `${getPortalBasePath(portal)}/auth`;
 }
 

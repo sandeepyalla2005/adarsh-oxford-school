@@ -211,23 +211,32 @@ export default function TransportFees() {
     try {
       const receiptNumber = `TRN-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-      const { error } = await supabase
-        .from('transport_payments')
-        .insert({
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/payments/collect`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`,
+        },
+        body: JSON.stringify({
           student_id: selectedStudent.id,
+          type: 'transport',
           academic_year: academicYear,
-          month: parseInt(selectedMonth),
-          amount_paid: parseFloat(paymentAmount),
-          payment_method: paymentMethod,
+          amount: parseFloat(paymentAmount),
+          method: paymentMethod,
+          term: parseInt(selectedMonth),
           receipt_number: receiptNumber,
-          collected_by: user.id,
-        });
+        }),
+      });
 
-      if (error) throw error;
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to record payment');
+      }
 
       toast({
         title: 'Payment Recorded',
-        description: `Receipt: ${receiptNumber}`,
+        description: `Receipt: ${receiptNumber}. Notifications sent.`,
       });
 
       setPaymentDialogOpen(false);
