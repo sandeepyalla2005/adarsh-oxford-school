@@ -47,6 +47,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { getCurrentAcademicYear } from '@/lib/academic-year';
+import { getApiBaseUrl } from '@/lib/api';
 
 interface Class {
   id: string;
@@ -430,7 +431,7 @@ export default function FeeStructure() {
       // But we can just use the supabase client's current session for the header.
       const { data: { session } } = await supabase.auth.getSession();
       
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/fee-structure/${id}`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/fee-structure/${id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${session?.access_token}`,

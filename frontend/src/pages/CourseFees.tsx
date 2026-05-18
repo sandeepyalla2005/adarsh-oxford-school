@@ -52,6 +52,7 @@ import { getCurrentAcademicYear } from '@/lib/academic-year';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { getApiBaseUrl } from '@/lib/api';
 
 interface Student {
   id: string;
@@ -223,7 +224,7 @@ export default function CourseFees() {
       const receiptNumber = `RCP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
       const { data: { session } } = await supabase.auth.getSession();
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/payments/collect`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/payments/collect`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

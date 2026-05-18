@@ -12,6 +12,14 @@ function normalizePath(path: string): string {
 }
 
 export function getApiBaseUrl(): string {
+  if (typeof window !== "undefined") {
+    const hostname = window.location.hostname;
+    // If not running on localhost/127.0.0.1 and not in local dev mode, default to the production backend
+    if (hostname !== "localhost" && hostname !== "127.0.0.1" && !import.meta.env.DEV) {
+      return "https://backend-8xzd.onrender.com";
+    }
+  }
+
   const configured = API_BASE_URL.trim();
   if (configured) {
     return trimTrailingSlash(configured);
@@ -21,7 +29,7 @@ export function getApiBaseUrl(): string {
     return DEV_FALLBACK_API_BASE_URL;
   }
 
-  const hostname = window.location.hostname;
+  const hostname = typeof window !== "undefined" ? window.location.hostname : "";
   if (hostname === "localhost" || hostname === "127.0.0.1") {
     return DEV_FALLBACK_API_BASE_URL;
   }
