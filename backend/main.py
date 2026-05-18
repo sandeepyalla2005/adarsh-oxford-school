@@ -447,34 +447,29 @@ def get_student_counts():
         classes_res = supabase.table("classes").select("id, name").order("sort_order").execute()
         class_list = classes_res.data or []
         
+        # Create map of class_id to name
+        class_id_to_name = {c["id"]: c["name"] for c in class_list}
+        
+        # Initialize counts
         counts: dict[str, int] = {"all": 0}
-        try:
-            total_res = supabase.table("students").select("id", count="exact", head=True).eq("is_active", True).execute()
-            counts["all"] = int(total_res.count or 0)
-        except Exception as e:
-            logger.error(f"Error counting all students: {e}")
+        for c in class_list:
+            counts[c["name"]] = 0
             
-        def count_for_class(cls):
-            try:
-                res = supabase.table("students").select("id", count="exact", head=True).eq("is_active", True).eq("class_id", cls["id"]).execute()
-                return cls["name"], int(res.count or 0)
-            except Exception as e:
-                logger.error(f"Error counting students for class {cls['name']}: {e}")
-                return cls["name"], 0
-                
-        with ThreadPoolExecutor(max_workers=5) as exec:
-            results = list(exec.map(count_for_class, class_list))
-            
-        for name, count in results:
-            counts[name] = count
+        # 2. Fetch all active student class_ids in ONE single query
+        students_res = supabase.table("students").select("class_id").eq("is_active", True).execute()
+        students_data = students_res.data or []
+        
+        # 3. Aggregate counts in Python
+        for student in students_data:
+            counts["all"] += 1
+            cid = student.get("class_id")
+            if cid in class_id_to_name:
+                class_name = class_id_to_name[cid]
+                counts[class_name] += 1
         
         return cache_set("students:counts", counts, READ_CACHE_TTL_SECONDS)
     except Exception as e:
-        logger.error(f"Critical error in get_student_counts: {e}")
-        return {"all": 0}
-    except Exception as e:
-        logger.error(f"Critical error in get_student_counts: {e}")
-        # Final fallback: return at least a 0 structure
+        logger.error(f"Critical error in get_student_counts: {e}", exc_info=True)
         return {"all": 0}
 
 @app.post("/api/students/clear-cache")
