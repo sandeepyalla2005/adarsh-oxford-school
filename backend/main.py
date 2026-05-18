@@ -1070,6 +1070,174 @@ async def reject_dropout(student_id: str, user=Depends(get_current_user)):
         logger.error(f"Dropout rejection error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+def verify_action_otp(user_id: str, op_type: str, otp: str) -> bool:
+    try:
+        admin_client = get_admin_client()
+        now = datetime.now().isoformat()
+        res = admin_client.table("wipe_requests")\
+            .select("*")\
+            .eq("user_id", user_id)\
+            .eq("operation_type", op_type)\
+            .is_("consumed_at", "null")\
+            .gt("expires_at", now)\
+            .order("created_at", desc=True)\
+            .limit(1)\
+            .execute()
+            
+        if not res.data:
+            return False
+            
+        record = res.data[0]
+        expected_hash = hash_otp(str(otp), record["otp_salt"])
+        if hmac.compare_digest(expected_hash, record["otp_hash"]):
+            # Consume it
+            admin_client.table("wipe_requests").update({"consumed_at": datetime.now().isoformat()}).eq("id", record["id"]).execute()
+            return True
+    except Exception as e:
+        logger.error(f"OTP validation error: {e}")
+    return False
+
+
+class PromoteStudentsRequest(BaseModel):
+    otp: Optional[str] = None
+
+@app.post("/api/students/promote")
+async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current_user)):
+    try:
+        user_role = getattr(user, "role", "staff")
+        if user_role not in ["admin", "feeInCharge"]:
+            raise HTTPException(status_code=403, detail="Not authorized to promote students")
+            
+        if user_role == "feeInCharge":
+            if not req.otp:
+                raise HTTPException(status_code=400, detail="OTP is required for Fee In-Charge users")
+            if not verify_action_otp(user.id, "promote", req.otp):
+                raise HTTPException(status_code=401, detail="Invalid or expired Admin OTP")
+                
+        admin_client = get_admin_client()
+        # Fetch classes ordered by sort_order
+        class_res = admin_client.table("classes").select("id, sort_order, name").order("sort_order").execute()
+        if not class_res.data:
+            raise HTTPException(status_code=400, detail="No classes found to promote students")
+            
+        classes = class_res.data
+        promoted = 0
+        skipped = 0
+        
+        for i in range(len(classes)):
+            current = classes[i]
+            if i + 1 >= len(classes):
+                # Highest class, count as skipped
+                count_res = admin_client.table("students").select("id", count="exact", head=True).eq("class_id", current["id"]).eq("is_active", True).execute()
+                skipped += count_res.count or 0
+                continue
+                
+            next_class = classes[i + 1]
+            update_res = admin_client.table("students").update({"class_id": next_class["id"]}).eq("class_id", current["id"]).eq("is_active", True).execute()
+            promoted += len(update_res.data) if update_res.data else 0
+            
+        clear_all_caches()
+        return {
+            "status": "success",
+            "message": f"Promoted {promoted} students. Skipped {skipped} students in the highest class.",
+            "promoted": promoted,
+            "skipped": skipped
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Promotion error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DeleteStudentRequest(BaseModel):
+    otp: Optional[str] = None
+
+@app.post("/api/students/delete/{student_id}")
+async def delete_student(student_id: str, req: DeleteStudentRequest, user=Depends(get_current_user)):
+    try:
+        user_role = getattr(user, "role", "staff")
+        if user_role not in ["admin", "feeInCharge"]:
+            raise HTTPException(status_code=403, detail="Not authorized to delete students")
+            
+        if user_role == "feeInCharge":
+            if not req.otp:
+                raise HTTPException(status_code=400, detail="OTP is required for Fee In-Charge users")
+            if not verify_action_otp(user.id, "delete_student", req.otp):
+                raise HTTPException(status_code=401, detail="Invalid or expired Admin OTP")
+                
+        admin_client = get_admin_client()
+        # Soft delete the student: status = dropout, is_active = false, dropout_reason = DELETED_PENDING_PURGE
+        res = admin_client.table("students").update({
+            "status": "dropout",
+            "is_active": False,
+            "dropout_reason": "DELETED_PENDING_PURGE",
+            "dropout_date": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat()
+        }).eq("id", student_id).execute()
+        
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Student not found or deletion failed")
+            
+        clear_all_caches()
+        return {"status": "success", "message": "Student moved to deletion queue (15-day retention)."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Student delete error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class RemoveClassRequest(BaseModel):
+    class_id: Optional[str] = None
+    class_name: Optional[str] = None
+    otp: Optional[str] = None
+
+@app.post("/api/students/remove-class")
+async def remove_class_students(req: RemoveClassRequest, user=Depends(get_current_user)):
+    try:
+        user_role = getattr(user, "role", "staff")
+        if user_role not in ["admin", "feeInCharge"]:
+            raise HTTPException(status_code=403, detail="Not authorized to remove students")
+            
+        if user_role == "feeInCharge":
+            if not req.otp:
+                raise HTTPException(status_code=400, detail="OTP is required for Fee In-Charge users")
+            if not verify_action_otp(user.id, "remove_class", req.otp):
+                raise HTTPException(status_code=401, detail="Invalid or expired Admin OTP")
+                
+        admin_client = get_admin_client()
+        
+        if req.class_name == "all" or not req.class_id:
+            # Soft delete all students across all classes
+            res = admin_client.table("students").update({
+                "status": "dropout",
+                "is_active": False,
+                "dropout_reason": "DELETED_PENDING_PURGE",
+                "dropout_date": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
+            }).neq("id", "00000000-0000-0000-0000-000000000000").execute()
+        else:
+            # Soft delete students only in this class
+            res = admin_client.table("students").update({
+                "status": "dropout",
+                "is_active": False,
+                "dropout_reason": "DELETED_PENDING_PURGE",
+                "dropout_date": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
+            }).eq("class_id", req.class_id).execute()
+            
+        count = len(res.data) if res.data else 0
+        clear_all_caches()
+        return {"status": "success", "message": f"Successfully removed {count} students class records.", "count": count}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Class remove error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # --- AUTH & SECURITY (FORGOT PASSWORD) ---
 
 class ForgotPasswordRequest(BaseModel):
@@ -1216,11 +1384,11 @@ async def request_wipe(request: Optional[dict] = None, user=Depends(get_current_
             "operation_type": op_type,
             "otp_hash": hash_otp(otp, salt),
             "otp_salt": salt,
-            "plain_otp": otp, # Store plain for dashboard
+            "plain_otp": None, # Do NOT store cleartext OTP in DB for dashboard security
             "expires_at": expires_at.isoformat(),
         }).execute()
         
-        logger.info(f"Wipe OTP generated for user {user.id} ({op_type}): {otp}")
+        logger.info(f"Wipe OTP generated for user {user.id} ({op_type})")
         
         # Try to send email
         notify_email = os.environ.get("WIPE_NOTIFICATION_EMAIL", "").strip()
@@ -1230,12 +1398,12 @@ async def request_wipe(request: Optional[dict] = None, user=Depends(get_current_
                 notify_email = admin_res.data[0]["email"]
         
         if notify_email:
-            send_reset_otp(notify_email, f"Security Alert: A wipe request for '{op_type}' has been initiated.\n\nOTP: {otp}\n\nRequested by user: {user.id}\nExpires in 10 minutes.")
+            send_reset_otp(notify_email, f"Security Alert: A wipe request for '{op_type}' has been initiated.\n\nOTP Code: {otp}\n\nRequested by user: {user.id}\nExpires in 10 minutes.")
             logger.info(f"Wipe OTP email sent to: {notify_email}")
         else:
             logger.warning("No administrator email found for wipe notification. OTP generated but not emailed.")
             
-        return {"status": "success", "message": f"Wipe request for '{op_type}' initiated. OTP has been sent."}
+        return {"status": "success", "message": f"Wipe request for '{op_type}' initiated. OTP has been sent to Admin's registered email."}
         
     except Exception as e:
         logger.error(f"Wipe OTP request failed: {e}")
@@ -1243,18 +1411,13 @@ async def request_wipe(request: Optional[dict] = None, user=Depends(get_current_
 
 @app.get("/api/auth/admin/pending-wipes")
 async def get_pending_wipes(user=Depends(get_current_user)):
-    """Returns pending wipe requests for the Admin Portal."""
+    """Returns pending wipe requests for the Admin Portal without exposing the secure OTP."""
     try:
         if getattr(user, "role", None) != "admin":
             return [] # Non-admins see nothing
         
         # Fetch from database instead of memory
         now = datetime.now().isoformat()
-        # We need to return the actual OTP if we want it displayed in the dashboard
-        # But we only store the hash. Let's add a plain_otp column to wipe_requests for this specific dashboard display
-        # OR just rely on the email.
-        # Actually, the user's previous implementation showed it in clear text.
-        # I will update the migration to include a plain_otp column.
         w_res = admin_client.table("wipe_requests").select("*, profiles(full_name)").is_("consumed_at", "null").gt("expires_at", now).execute()
         
         enriched = []
@@ -1263,7 +1426,7 @@ async def get_pending_wipes(user=Depends(get_current_user)):
             enriched.append({
                 "user_id": row["user_id"], 
                 "user_name": name, 
-                "otp": row.get("plain_otp", "******"), 
+                "otp": "******", # Explicitly mask OTP so it is not visible on the Admin screen (Gmail only)
                 "operation": row.get("operation_type", "students"),
                 "created_at": row["created_at"]
             })

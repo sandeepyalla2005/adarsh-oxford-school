@@ -20,6 +20,15 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/lib/auth';
+import { apiFetch } from '@/lib/api';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import { getCurrentAcademicYear } from '@/lib/academic-year';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -42,7 +51,7 @@ interface SchoolSetting {
 }
 
 export default function Settings() {
-  const { user, isAdmin, isStaff } = useAuth();
+  const { user, isAdmin, isStaff, userRole } = useAuth();
   const { toast } = useToast();
 
   const [settings, setSettings] = useState<SchoolSetting | null>(null);
@@ -50,6 +59,9 @@ export default function Settings() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPromoting, setIsPromoting] = useState(false);
   const [isCreatingStaff, setIsCreatingStaff] = useState(false);
+  const [showOtpDialog, setShowOtpDialog] = useState(false);
+  const [promoteOtp, setPromoteOtp] = useState('');
+  const [isRequestingOtp, setIsRequestingOtp] = useState(false);
   const [formData, setFormData] = useState({
     school_name: '',
     school_address: '',
@@ -165,8 +177,8 @@ export default function Settings() {
     }
   };
 
-  const handlePromoteStudents = async () => {
-    if (isStaff) {
+  const handlePromoteStudents = async (otpOverride?: string) => {
+    if (userRole === 'staff') {
       toast({
         variant: 'destructive',
         title: 'Permission Denied',
@@ -175,55 +187,58 @@ export default function Settings() {
       return;
     }
 
-    const confirmed = window.confirm(
-      'Promote all active students to the next class? Inactive (dropout) students will be skipped.'
-    );
-    if (!confirmed) return;
+    const isFeeInCharge = userRole === 'feeInCharge';
+
+    // If feeInCharge and we haven't obtained/passed an OTP yet, start OTP request
+    if (isFeeInCharge && !otpOverride) {
+      const confirmed = window.confirm(
+        'Promote all active students to the next class? Admin permission (OTP) is required.'
+      );
+      if (!confirmed) return;
+
+      setIsRequestingOtp(true);
+      try {
+        const resp = await apiFetch('/api/auth/request-wipe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ operation: 'promote' })
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || 'Failed to request OTP');
+        setShowOtpDialog(true);
+        toast({ title: '🔐 OTP Sent', description: data.message || 'Please get the 6-digit verification code from Admin.' });
+      } catch (err: any) {
+        toast({ variant: 'destructive', title: 'OTP Request Failed', description: err.message });
+      } finally {
+        setIsRequestingOtp(false);
+      }
+      return;
+    }
+
+    // Admin confirmation
+    if (!isFeeInCharge) {
+      const confirmed = window.confirm(
+        'Promote all active students to the next class? Inactive (dropout) students will be skipped.'
+      );
+      if (!confirmed) return;
+    }
 
     setIsPromoting(true);
     try {
-      const { data: classes, error: classError } = await supabase
-        .from('classes')
-        .select('id, sort_order, name')
-        .order('sort_order');
-
-      if (classError) throw classError;
-      if (!classes || classes.length === 0) {
-        throw new Error('No classes found to promote students.');
-      }
-
-      let promoted = 0;
-      let skipped = 0;
-
-      for (let i = 0; i < classes.length; i += 1) {
-        const current = classes[i];
-        const next = classes[i + 1];
-        if (!next) {
-          // Highest class, count as skipped
-          const { count } = await supabase
-            .from('students')
-            .select('id', { count: 'exact', head: true })
-            .eq('class_id', current.id)
-            .eq('is_active', true);
-          skipped += count || 0;
-          continue;
-        }
-
-        const { data: updated, error: updateError } = await supabase
-          .from('students')
-          .update({ class_id: next.id })
-          .eq('class_id', current.id)
-          .eq('is_active', true)
-          .select('id');
-
-        if (updateError) throw updateError;
-        promoted += updated?.length || 0;
-      }
+      const resp = await apiFetch('/api/students/promote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ otp: otpOverride || null })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || 'Promotion failed');
 
       toast({
         title: 'Promotion Complete',
-        description: `Promoted ${promoted} students. Skipped ${skipped} students (highest class).`,
+        description: data.message || `Promoted ${data.promoted} students. Skipped ${data.skipped} students.`,
       });
+      setShowOtpDialog(false);
+      setPromoteOtp('');
     } catch (error: any) {
       toast({
         variant: 'destructive',
@@ -674,6 +689,42 @@ export default function Settings() {
             </form>
           </CardContent>
         </Card>
+
+        {/* OTP Dialog for Promotion */}
+        <Dialog open={showOtpDialog} onOpenChange={setShowOtpDialog}>
+          <DialogContent className="max-w-md rounded-3xl border-none shadow-2xl bg-white p-6">
+            <DialogHeader>
+              <DialogTitle className="text-2xl font-bold flex items-center gap-3 text-slate-800">
+                Admin OTP Required
+              </DialogTitle>
+              <DialogDescription className="text-slate-600">
+                Please enter the 6-digit confirmation code sent to the administrator to authorize academic student promotion.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-4 space-y-4">
+              <Input
+                type="text"
+                placeholder="Enter 6-digit OTP"
+                value={promoteOtp}
+                onChange={(e) => setPromoteOtp(e.target.value)}
+                className="text-center text-xl font-bold tracking-[0.2em] rounded-xl py-6"
+                maxLength={6}
+              />
+            </div>
+            <DialogFooter className="flex gap-2">
+              <Button variant="outline" onClick={() => { setShowOtpDialog(false); setPromoteOtp(''); }} className="rounded-xl flex-1 py-6">
+                Cancel
+              </Button>
+              <Button
+                onClick={() => handlePromoteStudents(promoteOtp)}
+                disabled={isPromoting || promoteOtp.length !== 6}
+                className="bg-[#002147] hover:bg-[#003366] text-white rounded-xl flex-1 py-6 font-bold"
+              >
+                {isPromoting ? 'Verifying & Promoting...' : 'Verify & Promote'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </motion.div>
     </DashboardLayout>
   );

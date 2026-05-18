@@ -127,6 +127,13 @@ export default function ClassStudents() {
     const [studentHistory, setStudentHistory] = useState<any[]>([]);
     const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
+    const [showDeleteOtpDialog, setShowDeleteOtpDialog] = useState(false);
+    const [deleteOtp, setDeleteOtp] = useState('');
+    const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
+
+    const [showRemoveClassOtpDialog, setShowRemoveClassOtpDialog] = useState(false);
+    const [removeClassOtp, setRemoveClassOtp] = useState('');
+
     const [formData, setFormData] = useState({
         admission_number: '',
         full_name: '',
@@ -1021,10 +1028,36 @@ export default function ClassStudents() {
         }
     };
 
-    const handleDeleteDropout = async (student: Student) => {
-        // ... copy logic
+    const handleDeleteDropout = async (student: Student, otpOverride?: string) => {
         if (isStaff) return;
-        if (!confirm('Permanently delete?')) return;
+        const isFeeInCharge = userRole === 'feeInCharge';
+
+        if (isFeeInCharge && !otpOverride) {
+            if (!confirm('Permanently delete? Admin permission (OTP) is required.')) return;
+            setIsDeletingDropout(true);
+            try {
+                const resp = await apiFetch('/api/auth/request-wipe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ operation: 'delete_student' })
+                });
+                const data = await resp.json();
+                if (!resp.ok) throw new Error(data.detail || 'Failed to request OTP');
+                setStudentToDelete(student);
+                setShowDeleteOtpDialog(true);
+                toast({ title: '🔐 OTP Sent', description: data.message || 'Please get the 6-digit verification code from Admin.' });
+            } catch (err: any) {
+                toast({ variant: 'destructive', title: 'OTP Request Failed', description: err.message });
+            } finally {
+                setIsDeletingDropout(false);
+            }
+            return;
+        }
+
+        if (!isFeeInCharge) {
+            if (!confirm('Permanently delete?')) return;
+        }
+
         setIsDeletingDropout(true);
         try {
             // Log soft deletion
@@ -1039,19 +1072,20 @@ export default function ClassStudents() {
                 role: userRole || 'admin'
             });
 
-            // Update status to mark for 15-day auto-delete
-            const { error } = await supabase
-                .from('students')
-                .update({ 
-                    status: 'dropout', 
-                    is_active: false, 
-                    dropout_reason: 'DELETED_PENDING_PURGE',
-                    dropout_date: new Date().toISOString() 
-                })
-                .eq('id', student.id);
-                
-            if (error) throw error;
-            toast({ title: 'Removed', description: 'Student moved to deletion queue (15-day retention).' });
+            // Call backend delete student API
+            const resp = await apiFetch(`/api/students/delete/${student.id}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ otp: otpOverride || null })
+            });
+
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || 'Deletion failed');
+
+            toast({ title: 'Removed', description: data.message || 'Student moved to deletion queue (15-day retention).' });
+            setShowDeleteOtpDialog(false);
+            setDeleteOtp('');
+            setStudentToDelete(null);
             fetchStudents();
         } catch (e: any) {
             toast({ variant: 'destructive', title: 'Error', description: e.message });
@@ -1102,36 +1136,68 @@ export default function ClassStudents() {
         }
     };
 
-    const handleRemoveClassStudents = async () => {
+    const handleRemoveClassStudents = async (otpOverride?: string) => {
+        const isFeeInCharge = userRole === 'feeInCharge';
+
+        if (isFeeInCharge && !otpOverride) {
+            setShowRemoveConfirm(false);
+            setIsRemoving(true);
+            try {
+                const resp = await apiFetch('/api/auth/request-wipe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ operation: 'remove_class' })
+                });
+                const data = await resp.json();
+                if (!resp.ok) throw new Error(data.detail || 'Failed to request OTP');
+                setShowRemoveClassOtpDialog(true);
+                toast({ title: '🔐 OTP Sent', description: data.message || 'Please get the 6-digit verification code from Admin.' });
+            } catch (err: any) {
+                toast({ variant: 'destructive', title: 'OTP Request Failed', description: err.message });
+            } finally {
+                setIsRemoving(false);
+            }
+            return;
+        }
+
         setIsRemoving(true);
         setShowRemoveConfirm(false);
         try {
-            if (className === 'all') {
-                // Soft delete ALL students
-                const { error } = await supabase.from('students')
-                    .update({ 
-                        status: 'dropout', 
-                        is_active: false, 
-                        dropout_reason: 'DELETED_PENDING_PURGE',
-                        dropout_date: new Date().toISOString()
-                    })
-                    .neq('id', '00000000-0000-0000-0000-000000000000');
-                if (error) throw error;
-            } else {
-                // Soft delete students only in this class
+            let classId: string | null = null;
+            if (className !== 'all') {
                 const classObj = classes.find(c => c.name.toLowerCase() === className.toLowerCase());
                 if (!classObj) throw new Error('Class not found');
-                const { error } = await supabase.from('students')
-                    .update({ 
-                        status: 'dropout', 
-                        is_active: false, 
-                        dropout_reason: 'DELETED_PENDING_PURGE',
-                        dropout_date: new Date().toISOString()
-                    })
-                    .eq('class_id', classObj.id);
-                if (error) throw error;
+                classId = classObj.id;
             }
-            toast({ title: 'Removed', description: `Students moved to deletion queue (15-day retention policy).` });
+
+            // Log action
+            await logStudentAction({
+                studentName: className === 'all' ? 'All Students' : `Class ${className} Students`,
+                actionType: 'DELETE',
+                moduleName: 'Student Info',
+                oldValues: { detail: `Mass removal of student class records via OTP confirmation` },
+                performedBy: user?.id || '',
+                performedByName: profile?.full_name || 'Admin',
+                role: userRole || 'admin'
+            });
+
+            // Call backend remove class API
+            const resp = await apiFetch('/api/students/remove-class', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    class_id: classId,
+                    class_name: className,
+                    otp: otpOverride || null
+                })
+            });
+
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || 'Failed to remove students');
+
+            toast({ title: 'Removed', description: data.message || `Students moved to deletion queue (15-day retention policy).` });
+            setShowRemoveClassOtpDialog(false);
+            setRemoveClassOtp('');
             fetchStudents();
         } catch (e: any) {
             toast({ variant: 'destructive', title: 'Delete Failed', description: e.message || 'Could not remove students.' });
@@ -1933,6 +1999,77 @@ export default function ClassStudents() {
                     )}
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setShowHistoryDialog(false)} className="rounded-xl">Close</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+            {/* OTP Dialog for Individual Student Deletion */}
+            <Dialog open={showDeleteOtpDialog} onOpenChange={setShowDeleteOtpDialog}>
+                <DialogContent className="max-w-md rounded-3xl border-none shadow-2xl bg-white p-6">
+                    <DialogHeader>
+                        <DialogTitle className="text-2xl font-bold flex items-center gap-3 text-slate-800">
+                            Admin OTP Required
+                        </DialogTitle>
+                        <DialogDescription className="text-slate-600">
+                            Please enter the 6-digit confirmation code sent to the administrator to authorize deletion of student {studentToDelete ? getStudentName(studentToDelete) : ''}.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4 space-y-4">
+                        <Input
+                            type="text"
+                            placeholder="Enter 6-digit OTP"
+                            value={deleteOtp}
+                            onChange={(e) => setDeleteOtp(e.target.value)}
+                            className="text-center text-xl font-bold tracking-[0.2em] rounded-xl py-6"
+                            maxLength={6}
+                        />
+                    </div>
+                    <DialogFooter className="flex gap-2">
+                        <Button variant="outline" onClick={() => { setShowDeleteOtpDialog(false); setDeleteOtp(''); setStudentToDelete(null); }} className="rounded-xl flex-1 py-6">
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={() => studentToDelete && handleDeleteDropout(studentToDelete, deleteOtp)}
+                            disabled={isDeletingDropout || deleteOtp.length !== 6}
+                            className="bg-[#002147] hover:bg-[#003366] text-white rounded-xl flex-1 py-6 font-bold"
+                        >
+                            {isDeletingDropout ? 'Verifying & Deleting...' : 'Verify & Delete'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* OTP Dialog for Class mass deletion */}
+            <Dialog open={showRemoveClassOtpDialog} onOpenChange={setShowRemoveClassOtpDialog}>
+                <DialogContent className="max-w-md rounded-3xl border-none shadow-2xl bg-white p-6">
+                    <DialogHeader>
+                        <DialogTitle className="text-2xl font-bold flex items-center gap-3 text-slate-800">
+                            Admin OTP Required
+                        </DialogTitle>
+                        <DialogDescription className="text-slate-600">
+                            Please enter the 6-digit confirmation code sent to the administrator to authorize mass removal of students in class {className === 'all' ? 'All Classes' : className}.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4 space-y-4">
+                        <Input
+                            type="text"
+                            placeholder="Enter 6-digit OTP"
+                            value={removeClassOtp}
+                            onChange={(e) => setRemoveClassOtp(e.target.value)}
+                            className="text-center text-xl font-bold tracking-[0.2em] rounded-xl py-6"
+                            maxLength={6}
+                        />
+                    </div>
+                    <DialogFooter className="flex gap-2">
+                        <Button variant="outline" onClick={() => { setShowRemoveClassOtpDialog(false); setRemoveClassOtp(''); }} className="rounded-xl flex-1 py-6">
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={() => handleRemoveClassStudents(removeClassOtp)}
+                            disabled={isRemoving || removeClassOtp.length !== 6}
+                            className="bg-[#002147] hover:bg-[#003366] text-white rounded-xl flex-1 py-6 font-bold"
+                        >
+                            {isRemoving ? 'Verifying & Removing...' : 'Verify & Remove All'}
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
