@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Any, Optional
@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import os
 import secrets
+import json
 import smtplib
 from email.message import EmailMessage
 from supabase import create_client, Client
@@ -85,6 +86,7 @@ def get_cors_origins() -> list[str]:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_cors_origins(),
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -590,14 +592,36 @@ def get_receipt(receipt_no: str, type: Optional[str] = None, user=Depends(get_cu
 
 # --- DASHBOARD & ANALYTICS ---
 
-@app.get("/api/dashboard/stats")
-def get_dashboard_stats(user=Depends(get_current_user)):
-    try:
-        cached = cache_get("dashboard:stats", STATS_CACHE_TTL_SECONDS)
-        if cached is not None:
-            return cached
+# Helper: local cache file path
+STATS_FILE = os.path.join(os.path.dirname(__file__), "stats.json")
 
-        logger.info("Fetching fresh dashboard stats...")
+def load_stats_from_disk() -> dict:
+    try:
+        if os.path.exists(STATS_FILE):
+            with open(STATS_FILE, "r") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.error(f"Error loading stats from disk: {e}")
+    return {}
+
+def save_stats_to_disk(data: dict):
+    try:
+        with open(STATS_FILE, "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        logger.error(f"Error saving stats to disk: {e}")
+
+_refreshing_stats = False
+
+def refresh_dashboard_stats_task():
+    global _refreshing_stats
+    if _refreshing_stats:
+        logger.info("Stats refresh is already in progress, skipping background trigger.")
+        return
+    
+    _refreshing_stats = True
+    try:
+        logger.info("Background thread: Fetching fresh dashboard stats...")
         
         def count_students(filters: dict[str, str] | None = None) -> int:
             try:
@@ -734,9 +758,63 @@ def get_dashboard_stats(user=Depends(get_current_user)):
             "monthlyChartData": monthly_chart_data,
             "lastUpdated": datetime.now().isoformat()
         }
-        return cache_set("dashboard:stats", result, STATS_CACHE_TTL_SECONDS)
-    except HTTPException:
-        raise
+        cache_set("dashboard:stats", result, STATS_CACHE_TTL_SECONDS)
+        save_stats_to_disk(result)
+        logger.info("Background thread: Successfully refreshed dashboard stats.")
+    except Exception as e:
+        logger.error(f"Error in background stats refresh: {e}", exc_info=True)
+    finally:
+        _refreshing_stats = False
+
+@app.get("/api/dashboard/stats")
+def get_dashboard_stats(background_tasks: BackgroundTasks, user=Depends(get_current_user)):
+    try:
+        # 1. Try to read from memory cache
+        cached = cache_get("dashboard:stats", STATS_CACHE_TTL_SECONDS)
+        
+        # 2. If memory cache missed, try reading from disk cache
+        if cached is None:
+            disk_data = load_stats_from_disk()
+            if disk_data:
+                logger.info("Memory cache miss. Loaded stats from disk cache.")
+                cached = disk_data
+                # Put it in memory cache so we don't hit disk on subsequent hits
+                cache_set("dashboard:stats", disk_data, STATS_CACHE_TTL_SECONDS)
+
+        # 3. If we have a cached result (from memory or disk):
+        if cached is not None:
+            # Check if the data is stale (e.g. older than 5 minutes)
+            try:
+                last_updated_str = cached.get("lastUpdated")
+                if last_updated_str:
+                    last_updated = datetime.fromisoformat(last_updated_str)
+                    is_stale = (datetime.now() - last_updated).total_seconds() > STATS_CACHE_TTL_SECONDS
+                else:
+                    is_stale = True
+            except Exception:
+                is_stale = True
+
+            if is_stale:
+                logger.info("Stats cache is stale. Triggering background refresh...")
+                background_tasks.add_task(refresh_dashboard_stats_task)
+            
+            return cached
+
+        # 4. Fallback if absolutely no cache exists (e.g., first run ever)
+        default_stats = {
+            "totalStudents": 0,
+            "newStudents": 0,
+            "oldStudents": 0,
+            "todayIncome": 0.0,
+            "weeklyIncome": 0.0,
+            "monthlyIncome": 0.0,
+            "pendingFees": 0.0,
+            "monthlyChartData": [],
+            "lastUpdated": datetime.now().isoformat()
+        }
+        logger.info("No stats cache found. Triggering background refresh and returning default stats.")
+        background_tasks.add_task(refresh_dashboard_stats_task)
+        return default_stats
     except Exception as e:
         logger.error(f"Dashboard stats error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
