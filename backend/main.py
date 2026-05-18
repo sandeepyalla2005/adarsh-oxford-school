@@ -1000,6 +1000,9 @@ async def request_dropout(request: DropoutRequest, user=Depends(get_current_user
         old_dues = float(student_data.get("old_dues") or 0.0)
         total_pending = t1 + t2 + t3 + books + transport + old_dues
 
+        if total_pending > 0:
+            raise HTTPException(status_code=400, detail=f"Cannot dropout student with pending fees (₹{total_pending:,.2f}). Please clear or waive outstanding dues first!")
+
         # 4. Generate Enriched HTML Email Body
         email_html = f"""
         <!DOCTYPE html>
@@ -1166,12 +1169,24 @@ async def approve_dropout(student_id: str, user=Depends(get_current_user)):
             
         admin_client = get_admin_client()
         
-        # 1. Fetch current pending reason
-        student_res = admin_client.table("students").select("full_name, dropout_reason").eq("id", student_id).single().execute()
+        # 1. Fetch complete details of the student including fees
+        student_res = admin_client.table("students").select("*, classes(name)").eq("id", student_id).single().execute()
         if not student_res.data:
             raise HTTPException(status_code=404, detail="Student not found")
             
-        full_reason = student_res.data.get("dropout_reason", "")
+        student_data = student_res.data
+        t1 = float(student_data.get("term1_fee") or 0.0)
+        t2 = float(student_data.get("term2_fee") or 0.0)
+        t3 = float(student_data.get("term3_fee") or 0.0)
+        books = float(student_data.get("books_fee") or 0.0) if student_data.get("has_books") else 0.0
+        transport = float(student_data.get("transport_fee") or 0.0) if student_data.get("has_transport") else 0.0
+        old_dues = float(student_data.get("old_dues") or 0.0)
+        total_pending = t1 + t2 + t3 + books + transport + old_dues
+
+        if total_pending > 0:
+            raise HTTPException(status_code=400, detail=f"Cannot approve dropout for student with pending fees (₹{total_pending:,.2f}). Please clear or waive outstanding dues first!")
+
+        full_reason = student_data.get("dropout_reason", "")
         clean_reason = full_reason.replace("PENDING APPROVAL: ", "")
         
         # 2. Finalize status
@@ -1186,7 +1201,7 @@ async def approve_dropout(student_id: str, user=Depends(get_current_user)):
         if not res.data:
             raise HTTPException(status_code=500, detail="Failed to finalize dropout")
             
-        return {"status": "success", "message": f"Dropout for {student_res.data.get('full_name')} has been approved."}
+        return {"status": "success", "message": f"Dropout for {student_data.get('full_name')} has been approved."}
     except HTTPException:
         raise
     except Exception as e:
@@ -1311,13 +1326,31 @@ async def delete_student(student_id: str, req: DeleteStudentRequest, user=Depend
         if user_role not in ["admin", "feeInCharge"]:
             raise HTTPException(status_code=403, detail="Not authorized to delete students")
             
+        admin_client = get_admin_client()
+        
+        # 1. Fetch student details to verify pending fees
+        student_res = admin_client.table("students").select("full_name, term1_fee, term2_fee, term3_fee, old_dues, books_fee, transport_fee, has_books, has_transport").eq("id", student_id).single().execute()
+        if not student_res.data:
+            raise HTTPException(status_code=404, detail="Student not found")
+            
+        student_data = student_res.data
+        t1 = float(student_data.get("term1_fee") or 0.0)
+        t2 = float(student_data.get("term2_fee") or 0.0)
+        t3 = float(student_data.get("term3_fee") or 0.0)
+        books = float(student_data.get("books_fee") or 0.0) if student_data.get("has_books") else 0.0
+        transport = float(student_data.get("transport_fee") or 0.0) if student_data.get("has_transport") else 0.0
+        old_dues = float(student_data.get("old_dues") or 0.0)
+        total_pending = t1 + t2 + t3 + books + transport + old_dues
+
+        if total_pending > 0:
+            raise HTTPException(status_code=400, detail=f"Cannot delete student with pending fees (₹{total_pending:,.2f}). Please clear or waive outstanding dues first!")
+
         if user_role == "feeInCharge":
             if not req.otp:
                 raise HTTPException(status_code=400, detail="OTP is required for Fee In-Charge users")
             if not verify_action_otp(user.id, "delete_student", req.otp):
                 raise HTTPException(status_code=401, detail="Invalid or expired Admin OTP")
                 
-        admin_client = get_admin_client()
         # Soft delete the student: status = dropout, is_active = false, dropout_reason = DELETED_PENDING_PURGE
         res = admin_client.table("students").update({
             "status": "dropout",
