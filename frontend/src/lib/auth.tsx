@@ -36,7 +36,7 @@ interface AuthContextType {
 
 const ROLE_FETCH_TIMEOUT = 10000; // 10s is enough for cold starts
 const SESSION_FETCH_TIMEOUT = 8000; // 8s for session refresh – show login form fast
-const ROLE_FETCH_RETRIES = 1;
+const ROLE_FETCH_RETRIES = 2; // Keep 2 retries for extra robustness
 const ROLE_CACHE_KEY_PREFIX = 'user_role_';
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -425,9 +425,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryClient.clear();
 
     // 3. Clear SPECIFIC portal data
-    const buildMode = typeof document !== 'undefined' ? document.body?.dataset?.portalBuild : '';
     const runtimePort = typeof window !== 'undefined' ? window.location.port : '';
-    const currentStorageKey = `sb-adarsh-oxford-${runtimePort}-${buildMode}`;
+    const currentStorageKey = `sb-adarsh-oxford-${runtimePort}`;
     
     localStorage.removeItem(currentStorageKey);
     sessionStorage.clear();

@@ -445,18 +445,26 @@ def get_student_counts():
         classes_res = supabase.table("classes").select("id, name").order("sort_order").execute()
         class_list = classes_res.data or []
         
-        # 2. Fetch all active student class associations in ONE query
-        students_res = supabase.table("students").select("class_id").eq("is_active", True).execute()
-        students_data = students_res.data or []
-        
-        # 3. Count in Python (Extremely fast)
-        from collections import Counter
-        class_counts = Counter(str(s["class_id"]) for s in students_data if s.get("class_id"))
-        
-        counts: dict[str, int] = {"all": len(students_data)}
-        for cls in class_list:
-            cid = str(cls["id"])
-            counts[cls["name"]] = class_counts.get(cid, 0)
+        counts: dict[str, int] = {"all": 0}
+        try:
+            total_res = supabase.table("students").select("id", count="exact", head=True).eq("is_active", True).execute()
+            counts["all"] = int(total_res.count or 0)
+        except Exception as e:
+            logger.error(f"Error counting all students: {e}")
+            
+        def count_for_class(cls):
+            try:
+                res = supabase.table("students").select("id", count="exact", head=True).eq("is_active", True).eq("class_id", cls["id"]).execute()
+                return cls["name"], int(res.count or 0)
+            except Exception as e:
+                logger.error(f"Error counting students for class {cls['name']}: {e}")
+                return cls["name"], 0
+                
+        with ThreadPoolExecutor(max_workers=5) as exec:
+            results = list(exec.map(count_for_class, class_list))
+            
+        for name, count in results:
+            counts[name] = count
         
         return cache_set("students:counts", counts, READ_CACHE_TTL_SECONDS)
     except Exception as e:
@@ -650,13 +658,44 @@ def get_dashboard_stats(user=Depends(get_current_user)):
         def get_monthly_income_data() -> list[dict[str, Any]]:
             months = []
             now = datetime.now()
+            start_date = (now - timedelta(days=5*30)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            
+            tables = ["course_payments", "books_payments", "transport_payments", "accessory_sales", "student_accessory_payments", "accessory_transactions"]
+            
+            # Fetch all data once per table for the 6 month window
+            all_data = []
+            for table in tables:
+                try:
+                    amount_col = "amount_paid"
+                    if table == "accessory_sales": amount_col = "total_amount"
+                    
+                    query = supabase.table(table).select(f"created_at, {amount_col}").gte("created_at", start_date.isoformat())
+                    res = query.execute()
+                    if res.data:
+                        for row in res.data:
+                            try:
+                                dt = datetime.fromisoformat(row["created_at"].replace('Z', '+00:00'))
+                                all_data.append({
+                                    "date": dt,
+                                    "amount": float(row.get(amount_col) or 0)
+                                })
+                            except (ValueError, TypeError):
+                                pass
+                except Exception as e:
+                    logger.error(f"Error fetching {table} for monthly stats: {e}")
+                    
+            # Bucket in Python
             for i in range(5, -1, -1):
                 start_of_month = (now - timedelta(days=i*30)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
                 end_of_month = (start_of_month + timedelta(days=32)).replace(day=1) - timedelta(seconds=1)
                 
-                income = get_income_stats_for_range(start_of_month, end_of_month)
-                month_name = start_of_month.strftime("%b")
+                # We need timezone aware comparisons
+                start_aware = start_of_month.astimezone() if start_of_month.tzinfo is None else start_of_month
+                end_aware = end_of_month.astimezone() if end_of_month.tzinfo is None else end_of_month
                 
+                income = sum(item["amount"] for item in all_data if start_aware <= item["date"].astimezone() <= end_aware)
+                
+                month_name = start_of_month.strftime("%b")
                 months.append({
                     "name": month_name,
                     "amount": income,
@@ -664,21 +703,6 @@ def get_dashboard_stats(user=Depends(get_current_user)):
                     "amountFormatted": f"₹{income:,.0f}"
                 })
             return months
-
-        def get_income_stats_for_range(start: datetime, end: datetime) -> float:
-            tables = ["course_payments", "books_payments", "transport_payments", "accessory_sales", "student_accessory_payments", "accessory_transactions"]
-            total = 0.0
-            for table in tables:
-                try:
-                    amount_col = "amount_paid"
-                    if table == "accessory_sales": amount_col = "total_amount"
-                    query = supabase.table(table).select(amount_col).gte("created_at", start.isoformat()).lte("created_at", end.isoformat())
-                    res = query.execute()
-                    if res.data:
-                        total += sum(float(row.get(amount_col) or 0) for row in res.data)
-                except:
-                    pass
-            return total
 
         with ThreadPoolExecutor(max_workers=6) as executor:
             total_future = executor.submit(count_students)

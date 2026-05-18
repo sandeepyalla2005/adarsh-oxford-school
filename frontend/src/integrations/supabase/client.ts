@@ -78,7 +78,7 @@ import { getAppBuildMode } from '@/lib/portal';
 const buildMode = getAppBuildMode();
 // Use the port number to hard-isolate sessions on localhost
 const runtimePort = typeof window !== 'undefined' ? window.location.port : 'default';
-const storageKey = `sb-adarsh-oxford-${runtimePort}-${buildMode}`;
+const storageKey = `sb-adarsh-oxford-${runtimePort}`;
 
 export const supabase = hasSupabaseConfig
   ? createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
