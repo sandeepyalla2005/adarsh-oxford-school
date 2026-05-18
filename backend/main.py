@@ -149,6 +149,15 @@ async def get_current_user(token: HTTPAuthorizationCredentials = Depends(auth_sc
             elif "staff" in roles:
                 user_role = "staff"
         
+        # Check profiles table for "Fee In-Charge" designation if user_role is staff
+        if user_role == "staff":
+            try:
+                profile_res = supabase.table("profiles").select("designation").eq("user_id", user.id).execute()
+                if profile_res.data and profile_res.data[0].get("designation") == "Fee In-Charge":
+                    user_role = "feeInCharge"
+            except Exception as e:
+                logger.error(f"Error checking profile designation in auth: {e}")
+        
         setattr(user, "role", user_role)
 
         # Cache the user
@@ -443,8 +452,11 @@ def get_student_counts():
         if cached is not None:
             return cached
 
+        # Use admin client to bypass RLS for system-wide counts
+        client = admin_supabase if admin_supabase is not None else supabase
+
         # 1. Fetch all classes
-        classes_res = supabase.table("classes").select("id, name").order("sort_order").execute()
+        classes_res = client.table("classes").select("id, name").order("sort_order").execute()
         class_list = classes_res.data or []
         
         # Create map of class_id to name
@@ -456,7 +468,7 @@ def get_student_counts():
             counts[c["name"]] = 0
             
         # 2. Fetch all active student class_ids in ONE single query
-        students_res = supabase.table("students").select("class_id").eq("is_active", True).execute()
+        students_res = client.table("students").select("class_id").eq("is_active", True).execute()
         students_data = students_res.data or []
         
         # 3. Aggregate counts in Python
@@ -618,9 +630,12 @@ def refresh_dashboard_stats_task():
     try:
         logger.info("Background thread: Fetching fresh dashboard stats...")
         
+        # Use admin client to bypass RLS for system-wide dashboard stats
+        client = admin_supabase if admin_supabase is not None else supabase
+        
         def count_students(filters: dict[str, str] | None = None) -> int:
             try:
-                query = supabase.table("students").select("id", count="exact", head=True).eq("is_active", True)
+                query = client.table("students").select("id", count="exact", head=True).eq("is_active", True)
                 if filters:
                     for key, value in filters.items():
                         query = query.eq(key, value)
@@ -641,7 +656,7 @@ def refresh_dashboard_stats_task():
                     amount_col = "amount_paid"
                     if table == "accessory_sales": amount_col = "total_amount"
                     
-                    query = supabase.table(table).select(amount_col)
+                    query = client.table(table).select(amount_col)
                     if since_date:
                         query = query.gte("created_at", since_date.isoformat())
                     
@@ -660,7 +675,7 @@ def refresh_dashboard_stats_task():
 
         def get_expected_fees() -> float:
             try:
-                res = supabase.table("students").select("term1_fee, term2_fee, term3_fee, old_dues, books_fee, transport_fee").eq("is_active", True).execute()
+                res = client.table("students").select("term1_fee, term2_fee, term3_fee, old_dues, books_fee, transport_fee").eq("is_active", True).execute()
                 total = 0.0
                 for s in res.data:
                     total += float(s.get("term1_fee") or 0)
@@ -688,7 +703,7 @@ def refresh_dashboard_stats_task():
                     amount_col = "amount_paid"
                     if table == "accessory_sales": amount_col = "total_amount"
                     
-                    query = supabase.table(table).select(f"created_at, {amount_col}").gte("created_at", start_date.isoformat())
+                    query = client.table(table).select(f"created_at, {amount_col}").gte("created_at", start_date.isoformat())
                     res = query.execute()
                     if res.data:
                         for row in res.data:
@@ -958,6 +973,186 @@ async def collect_payment(request: PaymentCollectionRequest, user=Depends(get_cu
         raise
     except Exception as e:
         logger.error(f"Payment collection error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class StudentCreateUpdateRequest(BaseModel):
+    admission_number: str
+    full_name: str
+    class_id: str
+    roll_number: Optional[str] = None
+    gender: Optional[str] = "Male"
+    father_name: str
+    father_phone: str
+    mother_name: Optional[str] = None
+    mother_phone: Optional[str] = None
+    dob: Optional[str] = None
+    aadhaar: Optional[str] = None
+    address: Optional[str] = None
+    term1_fee: Optional[float] = 0.0
+    term2_fee: Optional[float] = 0.0
+    term3_fee: Optional[float] = 0.0
+    has_books: Optional[bool] = False
+    books_fee: Optional[float] = 0.0
+    has_transport: Optional[bool] = False
+    transport_fee: Optional[float] = 0.0
+    old_dues: Optional[float] = 0.0
+    parent_email: Optional[str] = None
+    student_type: Optional[str] = "new"
+    joining_date: Optional[str] = None
+    profile_photo: Optional[str] = None
+    is_active: Optional[bool] = True
+    status: Optional[str] = "active"
+
+class DropoutConfirmRequest(BaseModel):
+    reason: str
+
+@app.post("/api/students")
+async def create_student_api(student: StudentCreateUpdateRequest, user=Depends(get_current_user)):
+    try:
+        user_role = getattr(user, "role", "staff")
+        if user_role not in ["admin", "feeInCharge"]:
+            raise HTTPException(status_code=403, detail="Not authorized to add students")
+            
+        admin_client = get_admin_client()
+        
+        # Check if admission number already exists in the same class
+        existing = admin_client.table("students")\
+            .select("id")\
+            .eq("class_id", student.class_id)\
+            .eq("admission_number", student.admission_number)\
+            .execute()
+            
+        if existing.data:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Admission Number '{student.admission_number}' already exists in the selected class."
+            )
+            
+        student_dict = student.dict()
+        if not student_dict.get("joining_date"):
+            student_dict["joining_date"] = datetime.now().date().isoformat()
+            
+        res = admin_client.table("students").insert(student_dict).execute()
+        if not res.data:
+            raise HTTPException(status_code=500, detail="Failed to create student record")
+            
+        clear_all_caches()
+        return {"status": "success", "data": res.data[0]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating student: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/students/{student_id}")
+async def update_student_api(student_id: str, student: StudentCreateUpdateRequest, user=Depends(get_current_user)):
+    try:
+        user_role = getattr(user, "role", "staff")
+        if user_role not in ["admin", "feeInCharge"]:
+            raise HTTPException(status_code=403, detail="Not authorized to update students")
+            
+        admin_client = get_admin_client()
+        
+        # Check if admission number already exists in another student in the same class
+        existing = admin_client.table("students")\
+            .select("id")\
+            .eq("class_id", student.class_id)\
+            .eq("admission_number", student.admission_number)\
+            .neq("id", student_id)\
+            .execute()
+            
+        if existing.data:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Admission Number '{student.admission_number}' already exists for another student in the selected class."
+            )
+            
+        student_dict = student.dict()
+        res = admin_client.table("students").update(student_dict).eq("id", student_id).execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Student not found or update failed")
+            
+        clear_all_caches()
+        return {"status": "success", "data": res.data[0]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating student {student_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/students/dropout/{student_id}")
+async def mark_student_dropout(student_id: str, request: DropoutConfirmRequest, user=Depends(get_current_user)):
+    try:
+        user_role = getattr(user, "role", "staff")
+        if user_role != "admin":
+            raise HTTPException(status_code=403, detail="Only admins can directly mark students as dropout")
+            
+        admin_client = get_admin_client()
+        
+        # Check outstanding balance
+        student_res = admin_client.table("students").select("*").eq("id", student_id).single().execute()
+        if not student_res.data:
+            raise HTTPException(status_code=404, detail="Student not found")
+            
+        student_data = student_res.data
+        t1 = float(student_data.get("term1_fee") or 0.0)
+        t2 = float(student_data.get("term2_fee") or 0.0)
+        t3 = float(student_data.get("term3_fee") or 0.0)
+        books = float(student_data.get("books_fee") or 0.0) if student_data.get("has_books") else 0.0
+        transport = float(student_data.get("transport_fee") or 0.0) if student_data.get("has_transport") else 0.0
+        old_dues = float(student_data.get("old_dues") or 0.0)
+        total_pending = t1 + t2 + t3 + books + transport + old_dues
+        
+        if total_pending > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot dropout student with pending fees (₹{total_pending:,.2f}). Please clear or waive outstanding dues first!"
+            )
+            
+        res = admin_client.table("students").update({
+            "status": "dropout",
+            "is_active": False,
+            "dropout_reason": request.reason,
+            "dropout_date": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat()
+        }).eq("id", student_id).execute()
+        
+        if not res.data:
+            raise HTTPException(status_code=500, detail="Failed to mark student as dropout")
+            
+        clear_all_caches()
+        return {"status": "success", "message": "Student marked as dropout successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error marking student as dropout: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/students/restore/{student_id}")
+async def restore_student_api(student_id: str, user=Depends(get_current_user)):
+    try:
+        user_role = getattr(user, "role", "staff")
+        if user_role != "admin":
+            raise HTTPException(status_code=403, detail="Only admins can restore students")
+            
+        admin_client = get_admin_client()
+        res = admin_client.table("students").update({
+            "is_active": True,
+            "status": "active",
+            "dropout_reason": None,
+            "dropout_date": None,
+            "updated_at": datetime.now().isoformat()
+        }).eq("id", student_id).execute()
+        
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Student not found or restore failed")
+            
+        clear_all_caches()
+        return {"status": "success", "message": "Student restored successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error restoring student {student_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- STUDENT DROPOUT APPROVAL WORKFLOW ---

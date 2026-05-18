@@ -864,25 +864,27 @@ export default function ClassStudents() {
                     role: userRole || 'admin'
                 });
 
-                const { error } = await supabase.from('students').update(studentData).eq('id', selectedStudent.id);
-                if (error) throw error;
+                const resp = await apiFetch(`/api/students/${selectedStudent.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(studentData)
+                });
+                const data = await resp.json();
+                if (!resp.ok) throw new Error(data.detail || 'Failed to update student');
+
                 toast({ title: 'Student Updated', description: 'Student information updated successfully.' });
             } else {
-                const { data, error } = await supabase.from('students').insert(studentData).select().single();
-                if (error) {
-                    if (error.code === '23505') {
-                        throw new Error(`Admission Number "${formData.admission_number}" already exists in the selected class.`);
-                    }
-                    if (error.code === '22P02') {
-                        throw new Error('Invalid data format. Please check numeric fields like fees.');
-                    }
-                    throw error;
-                }
-
-                if (data) {
+                const resp = await apiFetch('/api/students', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(studentData)
+                });
+                const data = await resp.json();
+                if (!resp.ok) throw new Error(data.detail || 'Failed to add student');
+                if (data.data) {
                     // Log ADD action after successful insertion
                     await logStudentAction({
-                        studentId: (data as any).id,
+                        studentId: data.data.id,
                         studentName: formData.full_name.trim(),
                         actionType: 'ADD',
                         moduleName: 'Student Info',
@@ -1017,13 +1019,13 @@ export default function ClassStudents() {
                     role: userRole || 'admin'
                 });
 
-                const { error } = await supabase.from('students').update({
-                    is_active: false,
-                    status: 'dropout',
-                    dropout_reason: reason,
-                    dropout_date: new Date().toISOString()
-                }).eq('id', student.id);
-                if (error) throw error;
+                const resp = await apiFetch(`/api/students/dropout/${student.id}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason })
+                });
+                const data = await resp.json();
+                if (!resp.ok) throw new Error(data.detail || 'Failed to mark student as dropout');
                 toast({ title: 'Success', description: 'Student marked as dropout.' });
             } else {
                 // Fee In Charge requests dropout via backend
@@ -1132,17 +1134,11 @@ export default function ClassStudents() {
         if (!isAdmin) return;
         setIsSubmitting(true);
         try {
-            const { error } = await supabase
-                .from('students')
-                .update({
-                    is_active: true,
-                    status: 'active',
-                    dropout_reason: null,
-                    dropout_date: null
-                })
-                .eq('id', student.id);
-
-            if (error) throw error;
+            const resp = await apiFetch(`/api/students/restore/${student.id}`, {
+                method: 'POST'
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || 'Failed to restore student');
             toast({ title: 'Restored', description: `${getStudentName(student)} has been restored to active status.` });
             fetchStudents();
             setSelectedStudent(null);
