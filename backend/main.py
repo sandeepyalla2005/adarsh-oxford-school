@@ -972,16 +972,16 @@ async def request_dropout(request: DropoutRequest, user=Depends(get_current_user
     try:
         admin_client = get_admin_client()
         
-        # 1. Check if student exists
-        student_res = admin_client.table("students").select("full_name, status").eq("id", request.student_id).single().execute()
+        # 1. Fetch complete student details including classes
+        student_res = admin_client.table("students").select("*, classes(name)").eq("id", request.student_id).single().execute()
         if not student_res.data:
             raise HTTPException(status_code=404, detail="Student not found")
         
-        if student_res.data.get("status") == "dropout":
+        student_data = student_res.data
+        if student_data.get("status") == "dropout":
             raise HTTPException(status_code=400, detail="Student is already marked as dropout")
 
         # 2. Update status to 'dropout_pending'
-        # We'll use the dropout_reason field to store the requested reason
         res = admin_client.table("students").update({
             "status": "dropout_pending",
             "dropout_reason": f"PENDING APPROVAL: {request.reason}",
@@ -991,13 +991,163 @@ async def request_dropout(request: DropoutRequest, user=Depends(get_current_user
         if not res.data:
             raise HTTPException(status_code=500, detail="Failed to update student status")
             
-        # 3. Notify Admin (via email)
+        # 3. Calculate Pending Fees
+        t1 = float(student_data.get("term1_fee") or 0.0)
+        t2 = float(student_data.get("term2_fee") or 0.0)
+        t3 = float(student_data.get("term3_fee") or 0.0)
+        books = float(student_data.get("books_fee") or 0.0) if student_data.get("has_books") else 0.0
+        transport = float(student_data.get("transport_fee") or 0.0) if student_data.get("has_transport") else 0.0
+        old_dues = float(student_data.get("old_dues") or 0.0)
+        total_pending = t1 + t2 + t3 + books + transport + old_dues
+
+        # 4. Generate Enriched HTML Email Body
+        email_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <style>
+                body {{ font-family: 'Segoe UI', Arial, sans-serif; background-color: #f8fafc; color: #1e293b; margin: 0; padding: 20px; }}
+                .container {{ max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 30px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; }}
+                .header {{ background-color: #002147; padding: 24px; text-align: center; color: #ffffff; }}
+                .header h1 {{ margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 0.5px; }}
+                .header p {{ margin: 4px 0 0; font-size: 13px; opacity: 0.8; font-weight: 600; letter-spacing: 1px; }}
+                .content {{ padding: 32px; }}
+                .reason-box {{ background-color: #fef3c7; border-left: 4px solid #d97706; padding: 16px; border-radius: 8px; margin-bottom: 24px; }}
+                .reason-title {{ font-size: 11px; text-transform: uppercase; font-weight: 800; color: #b45309; letter-spacing: 1px; margin-bottom: 4px; }}
+                .reason-text {{ font-size: 15px; font-weight: 600; color: #78350f; margin: 0; }}
+                .section {{ margin-bottom: 24px; }}
+                .section-title {{ font-size: 12px; text-transform: uppercase; font-weight: 800; color: #64748b; letter-spacing: 1.5px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; margin-bottom: 12px; }}
+                .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }}
+                .cell {{ background-color: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #f1f5f9; }}
+                .label {{ font-size: 10px; text-transform: uppercase; font-weight: 700; color: #94a3b8; letter-spacing: 0.5px; margin-bottom: 2px; }}
+                .value {{ font-size: 14px; font-weight: 700; color: #334155; }}
+                .fee-row {{ display: flex; justify-content: space-between; padding: 8px 12px; border-bottom: 1px dashed #f1f5f9; font-size: 13px; }}
+                .fee-row:last-child {{ border-bottom: none; }}
+                .fee-total {{ display: flex; justify-content: space-between; padding: 12px; background-color: #fef2f2; border-radius: 8px; margin-top: 8px; font-weight: 800; color: #b91c1c; font-size: 15px; }}
+                .footer {{ background-color: #f1f5f9; padding: 16px; text-align: center; font-size: 11px; color: #94a3b8; font-weight: 600; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>ADARSH OXFORD</h1>
+                    <p>STUDENT DROPOUT REQUEST</p>
+                </div>
+                <div class="content">
+                    <div class="reason-box">
+                        <div class="reason-title">Reason for Dropout Request</div>
+                        <div class="reason-text">"{request.reason}"</div>
+                    </div>
+                    
+                    <div class="section">
+                        <div class="section-title">Student Profile</div>
+                        <div class="grid">
+                            <div class="cell">
+                                <div class="label">Full Name</div>
+                                <div class="value">{student_data.get("full_name")}</div>
+                            </div>
+                            <div class="cell">
+                                <div class="label">Class</div>
+                                <div class="value">{student_data.get("classes", {}).get("name", "N/A")}</div>
+                            </div>
+                            <div class="cell">
+                                <div class="label">Admission No</div>
+                                <div class="value">{student_data.get("admission_number" or "N/A")}</div>
+                            </div>
+                            <div class="cell">
+                                <div class="label">Roll Number</div>
+                                <div class="value">{student_data.get("roll_number") or "N/A"}</div>
+                            </div>
+                            <div class="cell">
+                                <div class="label">Gender</div>
+                                <div class="value">{student_data.get("gender") or "N/A"}</div>
+                            </div>
+                            <div class="cell">
+                                <div class="label">Date of Birth</div>
+                                <div class="value">{student_data.get("dob") or "N/A"}</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="section">
+                        <div class="section-title">Parent Contact Information</div>
+                        <div class="grid">
+                            <div class="cell">
+                                <div class="label">Father's Name</div>
+                                <div class="value">{student_data.get("father_name") or "N/A"}</div>
+                            </div>
+                            <div class="cell">
+                                <div class="label">Father's Phone</div>
+                                <div class="value">{student_data.get("father_phone") or "N/A"}</div>
+                            </div>
+                            <div class="cell">
+                                <div class="label">Mother's Name</div>
+                                <div class="value">{student_data.get("mother_name") or "N/A"}</div>
+                            </div>
+                            <div class="cell">
+                                <div class="label">Mother's Phone</div>
+                                <div class="value">{student_data.get("mother_phone") or "N/A"}</div>
+                            </div>
+                        </div>
+                        <div class="cell" style="margin-top: 12px;">
+                            <div class="label">Address</div>
+                            <div class="value" style="font-weight: 500;">{student_data.get("address") or "N/A"}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="section">
+                        <div class="section-title">Outstanding Pending Fees</div>
+                        <div style="background-color: #f8fafc; border-radius: 12px; border: 1px solid #f1f5f9; overflow: hidden; padding: 8px 0;">
+                            <div class="fee-row">
+                                <span style="font-weight: 500; color: #64748b;">Term 1 Course Fee</span>
+                                <span style="font-weight: 700; color: #475569;">₹{t1:,.2f}</span>
+                            </div>
+                            <div class="fee-row">
+                                <span style="font-weight: 500; color: #64748b;">Term 2 Course Fee</span>
+                                <span style="font-weight: 700; color: #475569;">₹{t2:,.2f}</span>
+                            </div>
+                            <div class="fee-row">
+                                <span style="font-weight: 500; color: #64748b;">Term 3 Course Fee</span>
+                                <span style="font-weight: 700; color: #475569;">₹{t3:,.2f}</span>
+                            </div>
+                            <div class="fee-row">
+                                <span style="font-weight: 500; color: #64748b;">Books Fee</span>
+                                <span style="font-weight: 700; color: #475569;">₹{books:,.2f}</span>
+                            </div>
+                            <div class="fee-row">
+                                <span style="font-weight: 500; color: #64748b;">Transport Fee</span>
+                                <span style="font-weight: 700; color: #475569;">₹{transport:,.2f}</span>
+                            </div>
+                            <div class="fee-row">
+                                <span style="font-weight: 500; color: #64748b;">Old Outstanding Dues</span>
+                                <span style="font-weight: 700; color: #475569;">₹{old_dues:,.2f}</span>
+                            </div>
+                            <div class="fee-total">
+                                <span>TOTAL PENDING BALANCE</span>
+                                <span>₹{total_pending:,.2f}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="footer">
+                    Requested by User: {user.id} | Action Logged Systematically
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        # 5. Notify Admin (via email)
         admin_email = os.environ.get("WIPE_NOTIFICATION_EMAIL", "sandeep.yalla506@gmail.com")
-        student_name = student_res.data.get("full_name")
+        student_name = student_data.get("full_name")
+        plain_text = f"Dropout requested for {student_name}.\n\nReason: {request.reason}\n\nPlease review full profile and outstanding fee details in your inbox or Admin Portal."
+        
         send_email(
             admin_email,
-            f"Dropout Request: {student_name}",
-            f"A dropout request has been submitted for {student_name}.\n\nReason: {request.reason}\nRequested By: {user.id}\n\nPlease log in to the Admin Portal to approve or reject this request."
+            f"Dropout Alert: {student_name} ({student_data.get('classes', {}).get('name', 'N/A')})",
+            plain_text,
+            html_body=email_html
         )
         
         return {"status": "success", "message": "Dropout request submitted to Admin for approval."}

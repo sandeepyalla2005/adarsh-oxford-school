@@ -28,6 +28,24 @@ type Student = {
     is_active?: boolean;
     dob?: string;
     father_name?: string;
+    father_phone?: string;
+    mother_name?: string;
+    mother_phone?: string;
+    parent_email?: string;
+    roll_number?: string;
+    gender?: string;
+    aadhaar?: string;
+    address?: string;
+    joining_date?: string;
+    term1_fee?: number;
+    term2_fee?: number;
+    term3_fee?: number;
+    has_books?: boolean;
+    books_fee?: number;
+    has_transport?: boolean;
+    transport_fee?: number;
+    old_dues?: number;
+    student_type?: string;
 };
 
 export default function AdminApprovals() {
@@ -171,73 +189,151 @@ export default function AdminApprovals() {
                                 <Card className="border-none shadow-md overflow-hidden ring-1 ring-slate-200 hover:shadow-lg transition-all">
                                     <div className="absolute top-0 left-0 w-2 h-full bg-amber-400"></div>
                                     <CardContent className="p-0">
-                                        <div className="flex flex-col md:flex-row items-stretch">
-                                            {/* Student Details Section */}
-                                            <div className="p-6 md:p-8 flex-1 border-b md:border-b-0 md:border-r border-slate-100 bg-white">
-                                                <div className="flex items-start justify-between mb-4">
-                                                    <div>
-                                                        <h3 className="text-2xl font-black text-[#002147] tracking-tight">{student.full_name}</h3>
-                                                        <p className="text-sm font-bold text-slate-500 flex items-center gap-2 mt-1">
-                                                            <GraduationCap className="h-4 w-4" />
-                                                            {getClassName(student)} • Adm No: {student.admission_number || 'N/A'}
-                                                        </p>
-                                                    </div>
-                                                    <Badge className="bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100">
-                                                        Action Required
-                                                    </Badge>
-                                                </div>
-                                                
-                                                <div className="grid grid-cols-2 gap-4 mt-6">
-                                                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                                                        <p className="text-[10px] uppercase font-black tracking-widest text-slate-400 mb-1">Father's Name</p>
-                                                        <p className="text-sm font-bold text-slate-700">{student.father_name || 'N/A'}</p>
-                                                    </div>
-                                                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                                                        <p className="text-[10px] uppercase font-black tracking-widest text-slate-400 mb-1">DOB</p>
-                                                        <p className="text-sm font-bold text-slate-700">{student.dob || 'N/A'}</p>
-                                                    </div>
-                                                </div>
-                                            </div>
+                                        {(() => {
+                                            const t1 = Number(student.term1_fee || 0);
+                                            const t2 = Number(student.term2_fee || 0);
+                                            const t3 = Number(student.term3_fee || 0);
+                                            const books = student.has_books ? Number(student.books_fee || 0) : 0;
+                                            const transport = student.has_transport ? Number(student.transport_fee || 0) : 0;
+                                            const oldDues = Number(student.old_dues || 0);
+                                            const totalPending = t1 + t2 + t3 + books + transport + oldDues;
 
-                                            {/* Request Details Section */}
-                                            <div className="p-6 md:p-8 md:w-96 bg-amber-50/30 flex flex-col justify-between">
-                                                <div>
-                                                    <h4 className="text-xs font-black uppercase tracking-widest text-amber-600 mb-2 flex items-center gap-2">
-                                                        <AlertCircle className="h-4 w-4" />
-                                                        Request Reason
-                                                    </h4>
-                                                    <p className="text-sm font-medium text-slate-700 leading-relaxed bg-white/60 p-4 rounded-xl border border-amber-100 shadow-sm">
-                                                        {student.dropout_reason || "No reason provided."}
-                                                    </p>
-                                                </div>
-                                                
-                                                <div className="flex gap-3 mt-8">
-                                                    <Button 
-                                                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md rounded-xl h-11"
-                                                        onClick={() => handleApprove(student)}
-                                                        disabled={processingId !== null}
-                                                    >
-                                                        {processingId === student.id ? (
-                                                            <Loader2 className="h-4 w-4 animate-spin" />
-                                                        ) : (
-                                                            <>
-                                                                <CheckCircle className="h-4 w-4 mr-2" />
-                                                                Approve
-                                                            </>
+                                            return (
+                                                <div className="flex flex-col lg:flex-row items-stretch">
+                                                    {/* Student Details Section */}
+                                                    <div className="p-6 md:p-8 flex-1 border-b lg:border-b-0 lg:border-r border-slate-100 bg-white space-y-6">
+                                                        <div className="flex items-start justify-between">
+                                                            <div>
+                                                                <h3 className="text-2xl font-black text-[#002147] tracking-tight">{student.full_name}</h3>
+                                                                <p className="text-sm font-bold text-slate-500 flex items-center gap-2 mt-1">
+                                                                    <GraduationCap className="h-4 w-4" />
+                                                                    {getClassName(student)} • Adm No: {student.admission_number || 'N/A'} • Roll No: {student.roll_number || 'N/A'}
+                                                                </p>
+                                                            </div>
+                                                            <Badge className="bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100">
+                                                                Action Required
+                                                            </Badge>
+                                                        </div>
+
+                                                        {/* Bento Detail Grid */}
+                                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                                            {/* Personal Info */}
+                                                            <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 space-y-3">
+                                                                <h4 className="text-[10px] font-black uppercase tracking-widest text-[#002147] border-b border-slate-200 pb-1.5 mb-2">Personal Profile</h4>
+                                                                <div>
+                                                                    <span className="text-[10px] uppercase font-bold text-slate-400">Gender</span>
+                                                                    <p className="text-xs font-bold text-slate-700">{student.gender || 'N/A'}</p>
+                                                                </div>
+                                                                <div>
+                                                                    <span className="text-[10px] uppercase font-bold text-slate-400">Date of Birth</span>
+                                                                    <p className="text-xs font-bold text-slate-700">{student.dob || 'N/A'}</p>
+                                                                </div>
+                                                                <div>
+                                                                    <span className="text-[10px] uppercase font-bold text-slate-400">Aadhaar Card</span>
+                                                                    <p className="text-xs font-bold text-slate-700">{student.aadhaar || 'N/A'}</p>
+                                                                </div>
+                                                                <div>
+                                                                    <span className="text-[10px] uppercase font-bold text-slate-400">Student Type</span>
+                                                                    <p className="text-xs font-bold text-slate-700 uppercase">{student.student_type || 'N/A'}</p>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Family & Contact Info */}
+                                                            <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 space-y-3">
+                                                                <h4 className="text-[10px] font-black uppercase tracking-widest text-[#002147] border-b border-slate-200 pb-1.5 mb-2">Family Contacts</h4>
+                                                                <div>
+                                                                    <span className="text-[10px] uppercase font-bold text-slate-400">Father's Info</span>
+                                                                    <p className="text-xs font-bold text-slate-700">{student.father_name || 'N/A'}</p>
+                                                                    {student.father_phone && <p className="text-[11px] font-bold text-[#002147] mt-0.5">{student.father_phone}</p>}
+                                                                </div>
+                                                                <div>
+                                                                    <span className="text-[10px] uppercase font-bold text-slate-400">Mother's Info</span>
+                                                                    <p className="text-xs font-bold text-slate-700">{student.mother_name || 'N/A'}</p>
+                                                                    {student.mother_phone && <p className="text-[11px] font-bold text-[#002147] mt-0.5">{student.mother_phone}</p>}
+                                                                </div>
+                                                                {student.parent_email && (
+                                                                    <div>
+                                                                        <span className="text-[10px] uppercase font-bold text-slate-400">Parent Email</span>
+                                                                        <p className="text-xs font-semibold text-slate-700 truncate">{student.parent_email}</p>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Financial Fee Breakdown */}
+                                                            <div className="bg-red-50/20 p-4 rounded-2xl border border-red-100/50 space-y-2">
+                                                                <h4 className="text-[10px] font-black uppercase tracking-widest text-red-700 border-b border-red-100 pb-1.5 mb-2">Outstanding Fees</h4>
+                                                                <div className="flex justify-between text-xs font-medium text-slate-600">
+                                                                    <span>Course Fee (T1 + T2 + T3):</span>
+                                                                    <span className="font-bold text-slate-800">₹{t1 + t2 + t3}</span>
+                                                                </div>
+                                                                <div className="flex justify-between text-xs font-medium text-slate-600">
+                                                                    <span>Books Fee:</span>
+                                                                    <span className="font-bold text-slate-800">₹{books}</span>
+                                                                </div>
+                                                                <div className="flex justify-between text-xs font-medium text-slate-600">
+                                                                    <span>Transport Fee:</span>
+                                                                    <span className="font-bold text-slate-800">₹{transport}</span>
+                                                                </div>
+                                                                <div className="flex justify-between text-xs font-medium text-slate-600">
+                                                                    <span>Old Outstanding Dues:</span>
+                                                                    <span className="font-bold text-slate-800">₹{oldDues}</span>
+                                                                </div>
+                                                                <div className="flex justify-between text-sm font-bold text-red-700 bg-red-100/50 px-2 py-1.5 rounded-lg border border-red-200 mt-2">
+                                                                    <span>Total Due:</span>
+                                                                    <span>₹{totalPending}</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {student.address && (
+                                                            <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
+                                                                <span className="text-[10px] uppercase font-bold text-slate-400">Residential Address</span>
+                                                                <p className="text-xs font-bold text-slate-700 mt-1">{student.address}</p>
+                                                            </div>
                                                         )}
-                                                    </Button>
-                                                    <Button 
-                                                        variant="outline"
-                                                        className="flex-1 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 font-bold shadow-sm rounded-xl h-11"
-                                                        onClick={() => handleReject(student)}
-                                                        disabled={processingId !== null}
-                                                    >
-                                                        <XCircle className="h-4 w-4 mr-2" />
-                                                        Reject
-                                                    </Button>
+                                                    </div>
+
+                                                    {/* Request Details Section */}
+                                                    <div className="p-6 md:p-8 lg:w-96 bg-amber-50/30 flex flex-col justify-between">
+                                                        <div>
+                                                            <h4 className="text-xs font-black uppercase tracking-widest text-amber-600 mb-2 flex items-center gap-2">
+                                                                <AlertCircle className="h-4 w-4" />
+                                                                Request Reason
+                                                            </h4>
+                                                            <p className="text-sm font-medium text-slate-700 leading-relaxed bg-white/60 p-4 rounded-xl border border-amber-100 shadow-sm">
+                                                                {student.dropout_reason || "No reason provided."}
+                                                            </p>
+                                                        </div>
+
+                                                        <div className="flex gap-3 mt-8">
+                                                            <Button 
+                                                                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md rounded-xl h-11"
+                                                                onClick={() => handleApprove(student)}
+                                                                disabled={processingId !== null}
+                                                            >
+                                                                {processingId === student.id ? (
+                                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                                ) : (
+                                                                    <>
+                                                                        <CheckCircle className="h-4 w-4 mr-2" />
+                                                                        Approve
+                                                                    </>
+                                                                )}
+                                                            </Button>
+                                                            <Button 
+                                                                variant="outline"
+                                                                className="flex-1 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 font-bold shadow-sm rounded-xl h-11"
+                                                                onClick={() => handleReject(student)}
+                                                                disabled={processingId !== null}
+                                                            >
+                                                                <XCircle className="h-4 w-4 mr-2" />
+                                                                Reject
+                                                            </Button>
+                                                        </div>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        </div>
+                                            );
+                                        })()}
                                     </CardContent>
                                 </Card>
                             </motion.div>
