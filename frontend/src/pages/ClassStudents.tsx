@@ -2004,7 +2004,7 @@ export default function ClassStudents() {
             </Dialog>
             {/* OTP Dialog for Individual Student Deletion */}
             <Dialog open={showDeleteOtpDialog} onOpenChange={setShowDeleteOtpDialog}>
-                <DialogContent className="max-w-md rounded-3xl border-none shadow-2xl bg-white p-6">
+                <DialogContent className="max-w-xl rounded-3xl border-none shadow-2xl bg-white p-6">
                     <DialogHeader>
                         <DialogTitle className="text-2xl font-bold flex items-center gap-3 text-slate-800">
                             Admin OTP Required
@@ -2013,7 +2013,68 @@ export default function ClassStudents() {
                             Please enter the 6-digit confirmation code sent to the administrator to authorize deletion of student {studentToDelete ? getStudentName(studentToDelete) : ''}.
                         </DialogDescription>
                     </DialogHeader>
-                    <div className="py-4 space-y-4">
+
+                    {studentToDelete && (() => {
+                        const t1 = Number(studentToDelete.term1_fee || 0);
+                        const t2 = Number(studentToDelete.term2_fee || 0);
+                        const t3 = Number(studentToDelete.term3_fee || 0);
+                        const books = studentToDelete.has_books ? Number(studentToDelete.books_fee || 0) : 0;
+                        const transport = studentToDelete.has_transport ? Number(studentToDelete.transport_fee || 0) : 0;
+                        const oldDues = Number(studentToDelete.old_dues || 0);
+                        const totalPending = t1 + t2 + t3 + books + transport + oldDues;
+
+                        return (
+                            <div className="my-4 bg-slate-50 rounded-2xl border border-slate-100 p-4 space-y-4 text-xs">
+                                <div className="border-b border-slate-200 pb-2 flex justify-between items-center">
+                                    <span className="font-extrabold uppercase tracking-wider text-[#002147]">Target Student Profile</span>
+                                    <Badge className="bg-red-100 text-red-800 border-red-200 uppercase text-[9px] font-bold">WIPE TARGET</Badge>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Full Name</span>
+                                        <span className="font-black text-slate-700 text-sm">{getStudentName(studentToDelete)}</span>
+                                    </div>
+                                    <div>
+                                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Class / Admission No</span>
+                                        <span className="font-bold text-slate-700">{studentToDelete.classes?.name || className || 'N/A'} • {studentToDelete.admission_number || 'N/A'}</span>
+                                    </div>
+                                    <div>
+                                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Roll Number</span>
+                                        <span className="font-bold text-slate-700">{studentToDelete.roll_number || 'N/A'}</span>
+                                    </div>
+                                    <div>
+                                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Date of Birth</span>
+                                        <span className="font-bold text-slate-700">{studentToDelete.dob || 'N/A'}</span>
+                                    </div>
+                                    <div>
+                                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Father's Info</span>
+                                        <span className="font-bold text-slate-700">{studentToDelete.father_name || 'N/A'}</span>
+                                        {studentToDelete.father_phone && <span className="block text-[10px] text-[#002147] font-bold">{studentToDelete.father_phone}</span>}
+                                    </div>
+                                    <div>
+                                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Mother's Info</span>
+                                        <span className="font-bold text-slate-700">{studentToDelete.mother_name || 'N/A'}</span>
+                                        {studentToDelete.mother_phone && <span className="block text-[10px] text-[#002147] font-bold">{studentToDelete.mother_phone}</span>}
+                                    </div>
+                                </div>
+                                {studentToDelete.address && (
+                                    <div className="bg-white/80 p-2.5 rounded-xl border border-slate-100">
+                                        <span className="text-[9px] font-bold text-slate-400 block uppercase">Residential Address</span>
+                                        <span className="font-semibold text-slate-600 block leading-tight">{studentToDelete.address}</span>
+                                    </div>
+                                )}
+                                <div className="bg-red-50/50 p-3 rounded-xl border border-red-100 flex justify-between items-center">
+                                    <div>
+                                        <span className="text-[10px] font-bold text-red-700 block uppercase">Outstanding Balance</span>
+                                        <span className="text-[10px] text-slate-500 font-medium">T1+T2+T3 + Books + Transport + Dues</span>
+                                    </div>
+                                    <span className="text-sm font-black text-red-700">₹{totalPending.toLocaleString()}</span>
+                                </div>
+                            </div>
+                        );
+                    })()}
+
+                    <div className="py-2 space-y-2">
                         <Input
                             type="text"
                             placeholder="Enter 6-digit OTP"
@@ -2040,7 +2101,7 @@ export default function ClassStudents() {
 
             {/* OTP Dialog for Class mass deletion */}
             <Dialog open={showRemoveClassOtpDialog} onOpenChange={setShowRemoveClassOtpDialog}>
-                <DialogContent className="max-w-md rounded-3xl border-none shadow-2xl bg-white p-6">
+                <DialogContent className="max-w-xl rounded-3xl border-none shadow-2xl bg-white p-6">
                     <DialogHeader>
                         <DialogTitle className="text-2xl font-bold flex items-center gap-3 text-slate-800">
                             Admin OTP Required
@@ -2049,7 +2110,28 @@ export default function ClassStudents() {
                             Please enter the 6-digit confirmation code sent to the administrator to authorize mass removal of students in class {className === 'all' ? 'All Classes' : className}.
                         </DialogDescription>
                     </DialogHeader>
-                    <div className="py-4 space-y-4">
+
+                    <div className="my-4 bg-red-50/50 rounded-2xl border border-red-100 p-4 space-y-3 text-xs">
+                        <div className="border-b border-red-200 pb-2 flex justify-between items-center">
+                            <span className="font-extrabold uppercase tracking-wider text-red-800">Wipe Operation Details</span>
+                            <Badge className="bg-red-600 text-white border-red-700 uppercase text-[9px] font-bold">MASS REMOVAL</Badge>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <span className="text-[10px] font-bold text-red-400 block uppercase">Target Class</span>
+                                <span className="font-black text-red-800 text-sm">{className === 'all' ? 'All Classes' : className}</span>
+                            </div>
+                            <div>
+                                <span className="text-[10px] font-bold text-red-400 block uppercase">Total Students Affected</span>
+                                <span className="font-black text-red-800 text-sm">{students.length} Students</span>
+                            </div>
+                        </div>
+                        <p className="text-[10px] text-red-500 font-semibold leading-relaxed mt-2">
+                            ⚠️ WARNING: This operation will permanently remove all {students.length} students currently listed in this view. This action is highly destructive and requires dual authorization.
+                        </p>
+                    </div>
+
+                    <div className="py-2 space-y-2">
                         <Input
                             type="text"
                             placeholder="Enter 6-digit OTP"

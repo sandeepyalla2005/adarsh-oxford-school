@@ -692,7 +692,7 @@ export default function Settings() {
 
         {/* OTP Dialog for Promotion */}
         <Dialog open={showOtpDialog} onOpenChange={setShowOtpDialog}>
-          <DialogContent className="max-w-md rounded-3xl border-none shadow-2xl bg-white p-6">
+          <DialogContent className="max-w-xl rounded-3xl border-none shadow-2xl bg-white p-6">
             <DialogHeader>
               <DialogTitle className="text-2xl font-bold flex items-center gap-3 text-slate-800">
                 Admin OTP Required
@@ -701,7 +701,21 @@ export default function Settings() {
                 Please enter the 6-digit confirmation code sent to the administrator to authorize academic student promotion.
               </DialogDescription>
             </DialogHeader>
-            <div className="py-4 space-y-4">
+
+            <div className="my-4 bg-emerald-50/50 rounded-2xl border border-emerald-100 p-4 space-y-3 text-xs">
+              <div className="border-b border-emerald-200 pb-2 flex justify-between items-center">
+                <span className="font-extrabold uppercase tracking-wider text-emerald-800">Academic Year Promotion</span>
+                <Badge className="bg-emerald-600 text-white border-emerald-700 uppercase text-[9px] font-bold">BULK ACTION</Badge>
+              </div>
+              <p className="text-emerald-700 font-bold leading-relaxed">
+                This operation will automatically advance all active students across all classes to their next respective academic standards (e.g., Nursery → LKG → UKG → Class 1).
+              </p>
+              <p className="text-[10px] text-slate-500 font-semibold leading-relaxed mt-2">
+                Skipped: All dropout (inactive) or graduated students. Ensure your term setup and final fees have been verified before completing.
+              </p>
+            </div>
+
+            <div className="py-2 space-y-2">
               <Input
                 type="text"
                 placeholder="Enter 6-digit OTP"
