@@ -433,30 +433,6 @@ def purge_deleted_students():
     except Exception as e:
         logger.error(f"Error purging deleted students: {e}")
 
-@app.get("/api/debug-db")
-def debug_db():
-    try:
-        url_val = os.environ.get("VITE_SUPABASE_URL") or os.environ.get("SUPABASE_URL")
-        key_val = os.environ.get("VITE_SUPABASE_PUBLISHABLE_KEY") or os.environ.get("SUPABASE_KEY")
-        masked_key = f"{key_val[:10]}...{key_val[-10:]}" if key_val else "None"
-        
-        res = supabase.table("students").select("id, is_active").execute()
-        students_count = len(res.data or [])
-        active_count = sum(1 for s in res.data if s.get("is_active") is True) if res.data else 0
-        
-        classes_res = supabase.table("classes").select("id, name").execute()
-        classes_count = len(classes_res.data or [])
-        
-        return {
-            "supabase_url": url_val,
-            "supabase_key_preview": masked_key,
-            "students_in_db": students_count,
-            "active_students_in_db": active_count,
-            "classes_in_db": classes_count
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
 @app.get("/api/students/counts")
 def get_student_counts():
     try:
