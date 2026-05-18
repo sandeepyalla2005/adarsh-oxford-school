@@ -1644,19 +1644,22 @@ export default function ClassStudents() {
                                                         )}
                                                     </div>
                                                 ) : (
-                                                    <>
+                                                    <div className="flex w-full gap-2">
                                                         <Button variant="outline" className="flex-1" onClick={() => openEditDialog(selectedStudent)} disabled={!isFeeAdmin}><Edit2 className="mr-2 h-4 w-4" />Edit</Button>
-                                                        <Button variant="destructive" className="flex-1" onClick={() => handleMarkDropout(selectedStudent)} disabled={!isFeeAdmin}>Mark Dropout</Button>
-                                                        <Button
-                                                            variant="outline"
-                                                            className="w-full gap-2 border-slate-200 mt-2 hover:bg-slate-50 text-[#002147] font-bold"
-                                                            onClick={() => setShowProfileDialog(true)}
-                                                        >
-                                                            <User className="h-4 w-4" />
-                                                            View Full Profile
-                                                        </Button>
-                                                    </>
+                                                        {selectedStudent.status !== 'dropout' && (
+                                                            <Button variant="destructive" className="flex-1" onClick={() => handleMarkDropout(selectedStudent)} disabled={!isFeeAdmin}>Mark Dropout</Button>
+                                                        )}
+                                                    </div>
                                                 )}
+                                                
+                                                <Button
+                                                    variant="outline"
+                                                    className="w-full gap-2 border-slate-200 mt-2 hover:bg-slate-50 text-[#002147] font-bold"
+                                                    onClick={() => setShowProfileDialog(true)}
+                                                >
+                                                    <User className="h-4 w-4" />
+                                                    View Full Profile
+                                                </Button>
                                             </div>
                                         </div>
                                     ) : (

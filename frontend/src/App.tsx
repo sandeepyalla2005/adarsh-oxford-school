@@ -63,6 +63,7 @@ const Receipt = lazyWithRetry(() => import("./pages/Receipt"));
 const DatabaseCheck = lazyWithRetry(() => import("./pages/DatabaseCheck"));
 const AdminAttendance = lazyWithRetry(() => import("./pages/admin/AdminAttendance"));
 const AdminHomework = lazyWithRetry(() => import("./pages/admin/AdminHomework"));
+const AdminApprovals = lazyWithRetry(() => import("./pages/admin/AdminApprovals"));
 const AdminAudit = lazyWithRetry(() => import("./pages/AdminAudit"));
 const FeeAnalytics = lazyWithRetry(() => import("./pages/FeeAnalytics"));
 const AccessoriesFees = lazyWithRetry(() => import("./pages/AccessoriesFees"));
@@ -153,6 +154,7 @@ const portalRoutes: PortalRouteDef[] = [
   { path: "/academic-calendar", element: <AcademicCalendar />, portals: ["admin", "staff", "fee"] },
   { path: "/audit", element: <AdminAudit />, portals: ["admin"] },
   { path: "/fee-analytics", element: <FeeAnalytics />, portals: ["admin"] },
+  { path: "/approvals", element: <AdminApprovals />, portals: ["admin"] },
   { path: "/staff-login", element: <StaffManagement />, portals: ["admin"] },
   { path: "/settings", element: <Settings />, portals: ["admin"] },
   { path: "/receipt", element: <Receipt />, portals: ["admin", "staff", "fee"] },

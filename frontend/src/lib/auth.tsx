@@ -34,8 +34,9 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<{ error: Error | null }>;
 }
 
-const ROLE_FETCH_TIMEOUT = 25000; // Increased to 25s to support database cold starts
-const ROLE_FETCH_RETRIES = 2;
+const ROLE_FETCH_TIMEOUT = 10000; // 10s is enough for cold starts
+const SESSION_FETCH_TIMEOUT = 8000; // 8s for session refresh – show login form fast
+const ROLE_FETCH_RETRIES = 1;
 const ROLE_CACHE_KEY_PREFIX = 'user_role_';
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -153,15 +154,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return winner as UserRole;
   };
 
+  // Helper: nuke every Supabase token from storage so the next load is clean
+  const clearStaleSupabaseTokens = () => {
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('sb-') || key.startsWith('supabase'))) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+      console.log('🧹 Cleared', keysToRemove.length, 'stale Supabase token(s)');
+    } catch (e) {
+      console.warn('Could not clear stale tokens:', e);
+    }
+  };
+
   useEffect(() => {
     const initAuth = async () => {
       try {
         console.log('🚀 Starting Auth Discovery...');
 
-        // Get session with timeout to prevent hanging
+        // Get session with a FAST timeout – don't let a stale token hang the UI
         const sessionPromise = supabase.auth.getSession();
         const sessionTimeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Session fetch timeout')), ROLE_FETCH_TIMEOUT)
+          setTimeout(() => reject(new Error('Session fetch timeout')), SESSION_FETCH_TIMEOUT)
         );
 
         let existingSession;
@@ -170,6 +188,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           existingSession = data?.session;
         } catch (err) {
           console.error('⚠️ Session fetch failed or timed out:', err);
+          // CRITICAL: purge the stale token so the NEXT page load is instant
+          clearStaleSupabaseTokens();
           setIsLoading(false);
           return;
         }
@@ -225,6 +245,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } catch (err) {
         console.error('💥 Auth initialization error:', err);
+        // Also clear tokens on unexpected crashes to prevent repeat hangs
+        clearStaleSupabaseTokens();
         setIsLoading(false);
       }
     };
@@ -246,17 +268,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (newSession?.user) {
         try {
-          const [role, foundProfile] = await Promise.all([
-            fetchUserRoleWithTimeout(newSession.user.id, newSession.user),
-            fetchProfile(newSession.user.id)
+          const result = await Promise.race([
+            Promise.all([
+              fetchUserRoleWithTimeout(newSession.user.id, newSession.user, 5000),
+              fetchProfile(newSession.user.id)
+            ]),
+            new Promise<[null, null]>((resolve) =>
+              setTimeout(() => resolve([null, null]), 6000)
+            ),
           ]);
-          const buildMode = typeof document !== 'undefined' ? document.body?.dataset?.portalBuild : '';
+          const [role, foundProfile] = result;
+          const port = typeof window !== 'undefined' ? window.location.port : '';
+          const portalDefault: UserRole = port === '8082' ? 'feeInCharge' : port === '8081' ? 'staff' : 'admin';
           const finalRole = (role === 'staff' && foundProfile?.designation === 'Fee In-Charge') 
             ? 'feeInCharge' 
-            : (role || (buildMode === 'admin' ? 'admin' : (buildMode === 'fee' ? 'feeInCharge' : 'staff')));
+            : (role || getCachedRole(newSession.user.id) || portalDefault);
           setUserRole(finalRole);
+          if (finalRole) setCachedRole(newSession.user.id, finalRole);
         } catch (err) {
-          setUserRole('staff');
+          console.warn('onAuthStateChange role fetch failed:', err);
+          setUserRole(getCachedRole(newSession.user.id) || 'staff');
         } finally {
           setIsLoading(false);
         }
@@ -273,31 +304,65 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = async (email: string, password: string, expectedRole?: Exclude<UserRole, null>) => {
     try {
       console.log('Sign-in attempt for:', email, 'Expected Role:', expectedRole);
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+      // ── Wrap the Supabase auth call in a 15s timeout to prevent infinite hang ──
+      const authResult = await Promise.race([
+        supabase.auth.signInWithPassword({ email, password }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Login timed out — please check your internet connection and try again.')), 15000)
+        ),
+      ]);
+      const { data, error } = authResult;
 
       if (error || !data.user) {
-        console.error('Sign-in credentials rejected:', error?.message);
-        return { error: error as Error | null };
+        const msg = error?.message || 'Unknown error';
+        console.error('Sign-in credentials rejected:', msg);
+        // Make "Failed to fetch" more user-friendly
+        const friendlyMsg = msg.includes('Failed to fetch') || msg.includes('NetworkError')
+          ? 'Network error — please check your internet connection and try again.'
+          : msg;
+        return { error: new Error(friendlyMsg) };
       }
 
-      console.log('Credentials valid, verifying role permissions...');
-      
-      // Fetch both role and profile to handle Fee In-Charge mapping
-      const [activeRole, foundProfile] = await Promise.all([
-        fetchUserRoleWithTimeout(data.user.id, data.user, ROLE_FETCH_TIMEOUT),
-        fetchProfile(data.user.id)
-      ]);
+      console.log('Credentials valid, resolving role (6s hard limit)...');
 
-      let finalRole: UserRole = activeRole;
-      if (activeRole === 'staff' && foundProfile?.designation === 'Fee In-Charge') {
-        console.log('Mapping staff user to feeInCharge based on designation');
-        finalRole = 'feeInCharge';
+      // ── Hard 6-second safety net for the ENTIRE role+profile lookup ──
+      let finalRole: UserRole = null;
+      try {
+        const result = await Promise.race([
+          Promise.all([
+            fetchUserRoleWithTimeout(data.user.id, data.user, 5000),
+            fetchProfile(data.user.id),
+          ]),
+          new Promise<[null, null]>((resolve) =>
+            setTimeout(() => {
+              console.warn('⏱️ Role+profile lookup timed out at 6s');
+              resolve([null, null]);
+            }, 6000)
+          ),
+        ]);
+
+        const [activeRole, foundProfile] = result;
+
+        if (activeRole === 'staff' && foundProfile?.designation === 'Fee In-Charge') {
+          console.log('Mapping staff → feeInCharge via designation');
+          finalRole = 'feeInCharge';
+        } else if (activeRole) {
+          finalRole = activeRole;
+        }
+      } catch (roleFetchErr) {
+        console.warn('Role fetch crashed, will use portal default:', roleFetchErr);
       }
 
-      if (expectedRole) {
-        // Enforce role matches expectation (Admins are allowed anywhere)
-        const isMatched = expectedRole === finalRole || finalRole === 'admin';
+      // ── If role fetch failed / timed out, trust the portal's expected role ──
+      if (!finalRole) {
+        console.log('Role unknown – defaulting to portal expected role:', expectedRole || 'admin');
+        finalRole = expectedRole || 'admin';
+      }
 
+      // ── Role gate: non-admin users can't access portals they don't belong to ──
+      if (expectedRole && finalRole !== 'admin') {
+        const isMatched = expectedRole === finalRole;
         if (!isMatched) {
           console.warn('Role mismatch! Expected:', expectedRole, 'but found:', finalRole);
           return {
@@ -306,7 +371,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
 
+      console.log('✅ Login complete. Role:', finalRole);
       setUserRole(finalRole);
+      if (finalRole) setCachedRole(data.user.id, finalRole);
       return { error: null };
     } catch (err) {
       console.error('Sign-in crash:', err);

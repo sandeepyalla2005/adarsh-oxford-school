@@ -173,7 +173,7 @@ def hash_otp(otp: str, salt: str) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def send_email(to_email: str, subject: str, body: str) -> None:
+def send_email(to_email: str, subject: str, body: str, html_body: str | None = None) -> None:
     smtp_host = os.environ.get("SMTP_HOST", "").strip()
     smtp_port = int(os.environ.get("SMTP_PORT", "587"))
     smtp_username = os.environ.get("SMTP_USERNAME", "").strip()
@@ -190,6 +190,8 @@ def send_email(to_email: str, subject: str, body: str) -> None:
     message["From"] = smtp_from
     message["To"] = to_email
     message.set_content(body)
+    if html_body:
+        message.add_alternative(html_body, subtype="html")
 
     try:
         with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
@@ -200,6 +202,140 @@ def send_email(to_email: str, subject: str, body: str) -> None:
         logger.info(f"Email sent to {to_email}: {subject}")
     except Exception as e:
         logger.error(f"Failed to send email to {to_email}: {e}")
+
+
+def _number_to_words(num: int) -> str:
+    """Convert a number to Indian English words (matches frontend Receipt.tsx)."""
+    a = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
+         'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen',
+         'Seventeen', 'Eighteen', 'Nineteen']
+    b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety']
+    if num == 0:
+        return 'Zero'
+    def convert(n: int) -> str:
+        if n < 20:
+            return a[n]
+        if n < 100:
+            return b[n // 10] + (' ' + a[n % 10] if n % 10 else '')
+        if n < 1000:
+            return a[n // 100] + ' Hundred' + (' and ' + convert(n % 100) if n % 100 else '')
+        if n < 100000:
+            return convert(n // 1000) + ' Thousand' + (' ' + convert(n % 1000) if n % 1000 else '')
+        if n < 10000000:
+            return convert(n // 100000) + ' Lakh' + (' ' + convert(n % 100000) if n % 100000 else '')
+        return str(n)
+    return convert(num).strip()
+
+
+def build_receipt_html(
+    receipt_no: str,
+    date_str: str,
+    student_name: str,
+    admission_no: str,
+    class_name: str,
+    academic_year: str,
+    particulars: list[dict],  # [{name, amount}]
+    total_amount: float,
+    payment_method: str,
+    narration: str,
+) -> str:
+    """Generate a professional HTML receipt matching the frontend Receipt.tsx design."""
+    rows_html = ""
+    for idx, item in enumerate(particulars, 1):
+        rows_html += f"""
+        <tr style="border-bottom:1px solid #e2e8f0;">
+            <td style="padding:10px 8px;font-weight:500;">{idx}</td>
+            <td style="padding:10px 8px;font-weight:700;text-transform:uppercase;">{item['name']}</td>
+            <td style="padding:10px 8px;text-align:right;font-weight:700;">₹{item['amount']:,.2f}</td>
+        </tr>"""
+
+    amount_words = _number_to_words(int(total_amount))
+
+    return f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:20px;background:#f1f5f9;font-family:'Segoe UI',Arial,sans-serif;">
+<div style="max-width:680px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+    <!-- Header -->
+    <div style="background:#002147;color:#fff;padding:24px 32px;text-align:center;">
+        <h1 style="margin:0;font-size:28px;font-weight:900;letter-spacing:1px;">ADARSH OXFORD</h1>
+        <p style="margin:4px 0 0;font-size:13px;letter-spacing:3px;opacity:0.8;">ENGLISH MEDIUM SCHOOL</p>
+    </div>
+
+    <!-- Receipt Badge -->
+    <div style="text-align:center;padding:16px 0 8px;">
+        <span style="display:inline-block;background:#002147;color:#fff;padding:6px 28px;border-radius:20px;font-size:14px;font-weight:700;letter-spacing:4px;">RECEIPT</span>
+    </div>
+
+    <!-- Student Info -->
+    <div style="padding:16px 32px;border-bottom:2px dashed #cbd5e1;">
+        <table style="width:100%;font-size:14px;color:#334155;">
+            <tr>
+                <td style="padding:4px 0;"><strong>Receipt No</strong></td>
+                <td style="padding:4px 0;">: {receipt_no}</td>
+                <td style="padding:4px 0;"><strong>Date</strong></td>
+                <td style="padding:4px 0;">: {date_str}</td>
+            </tr>
+            <tr>
+                <td style="padding:4px 0;"><strong>Name</strong></td>
+                <td style="padding:4px 0;">: {student_name}</td>
+                <td style="padding:4px 0;"><strong>Acd Year</strong></td>
+                <td style="padding:4px 0;">: {academic_year}</td>
+            </tr>
+            <tr>
+                <td style="padding:4px 0;"><strong>Class</strong></td>
+                <td style="padding:4px 0;">: {class_name}</td>
+                <td style="padding:4px 0;"><strong>Adm No</strong></td>
+                <td style="padding:4px 0;">: {admission_no}</td>
+            </tr>
+        </table>
+    </div>
+
+    <!-- Particulars Table -->
+    <div style="padding:16px 32px;">
+        <table style="width:100%;border-collapse:collapse;font-size:14px;color:#1e293b;">
+            <thead>
+                <tr style="border-bottom:2px solid #334155;">
+                    <th style="text-align:left;padding:8px;width:50px;">SL</th>
+                    <th style="text-align:left;padding:8px;">Particulars</th>
+                    <th style="text-align:right;padding:8px;width:120px;">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows_html}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Totals -->
+    <div style="padding:16px 32px;border-top:2px solid #002147;">
+        <table style="width:100%;font-size:14px;color:#1e293b;">
+            <tr>
+                <td style="padding:6px 0;"><strong>Mode Of Payment :</strong> {payment_method.upper()}</td>
+                <td style="padding:6px 0;text-align:right;font-size:18px;"><strong>Grand Total : ₹{total_amount:,.2f}</strong></td>
+            </tr>
+        </table>
+        <div style="border-top:1px dashed #94a3b8;margin-top:8px;padding-top:8px;font-size:13px;">
+            <strong>Amount In Words :</strong> <em>{amount_words} Rupees Only</em>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="padding:16px 32px 24px;border-top:1px dashed #002147;font-size:12px;color:#64748b;">
+        <p style="margin:4px 0;"><strong>Narration :</strong> {narration}</p>
+        <p style="margin:8px 0 0;font-size:11px;">NB:- This is a computer generated receipt and does not require physical signature.</p>
+        <div style="display:flex;justify-content:space-between;margin-top:16px;">
+            <span>{date_str}</span>
+            <span style="color:#002147;font-weight:700;">Created By: Adarsh Oxford</span>
+        </div>
+    </div>
+
+</div>
+</body>
+</html>
+"""
 
 def send_reset_otp(email: str, otp: str) -> None:
     send_email(
@@ -665,18 +801,59 @@ async def collect_payment(request: PaymentCollectionRequest, user=Depends(get_cu
         if student:
             phone = student.get("father_phone") or student.get("mother_phone")
             student_name = student.get("full_name")
-            class_name = student.get("classes", {}).get("name")
+            class_name = student.get("classes", {}).get("name", "N/A")
+            admission_no = student.get("admission_number", "N/A")
             
             # 5. Send SMS to Parent
             if phone:
                 sms_msg = f"Dear Parent, fee payment of Rs.{request.amount} for {student_name} ({class_name}) has been received. Receipt: {request.receipt_number}. Thank you - Adarsh Oxford School"
                 send_sms(phone, sms_msg)
                 
-            # 6. Send Email to School
+            # 6. Build receipt and send HTML receipt email to School
+            now = datetime.now()
+            date_str = now.strftime("%d %b %Y")
+
+            # Determine particulars label based on payment type
+            if request.type == "course":
+                particular_name = f"COURSE FEE ({'OLD DUE' if request.term == 0 else f'Term {request.term}'})"
+            elif request.type == "books":
+                particular_name = "BOOKS & ACCESSORIES"
+            elif request.type == "transport":
+                particular_name = "TRANSPORT FEE"
+            else:
+                particular_name = f"{request.type.upper()} FEE"
+
+            particulars = [{"name": particular_name, "amount": request.amount}]
+            narration = f"Fees for {particular_name}"
+
+            receipt_html = build_receipt_html(
+                receipt_no=request.receipt_number,
+                date_str=date_str,
+                student_name=student_name,
+                admission_no=admission_no,
+                class_name=class_name,
+                academic_year=request.academic_year,
+                particulars=particulars,
+                total_amount=request.amount,
+                payment_method=request.method,
+                narration=narration,
+            )
+
+            plain_text = (
+                f"Fee Receipt – {student_name}\n\n"
+                f"Receipt No: {request.receipt_number}\n"
+                f"Date: {date_str}\n"
+                f"Student: {student_name} ({admission_no})\n"
+                f"Class: {class_name}\n"
+                f"Amount: Rs.{request.amount:,.2f}\n"
+                f"Type: {particular_name}\n"
+                f"Method: {request.method}\n\n"
+                f"-- Adarsh Oxford English Medium School"
+            )
+
             school_email = os.environ.get("WIPE_NOTIFICATION_EMAIL", "sandeep.yalla506@gmail.com")
-            email_subject = f"Fee Payment Received: {student_name} ({request.receipt_number})"
-            email_body = f"Payment Details:\n\nStudent: {student_name}\nClass: {class_name}\nAmount: Rs.{request.amount}\nType: {request.type.capitalize()}\nMethod: {request.method}\nReceipt: {request.receipt_number}\nCollected By: {user.id}\nDate: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            send_email(school_email, email_subject, email_body)
+            email_subject = f"Fee Receipt: {student_name} – ₹{request.amount:,.0f} ({request.receipt_number})"
+            send_email(school_email, email_subject, plain_text, html_body=receipt_html)
             
         return {"status": "success", "receipt_number": request.receipt_number}
         
@@ -753,7 +930,7 @@ async def approve_dropout(student_id: str, user=Depends(get_current_user)):
         # 2. Finalize status
         res = admin_client.table("students").update({
             "status": "dropout",
-            "is_active": false,
+            "is_active": False,
             "dropout_reason": clean_reason,
             "dropout_date": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat()
@@ -781,7 +958,7 @@ async def reject_dropout(student_id: str, user=Depends(get_current_user)):
         # 1. Reset status to active
         res = admin_client.table("students").update({
             "status": "active",
-            "is_active": true,
+            "is_active": True,
             "dropout_reason": None,
             "updated_at": datetime.now().isoformat()
         }).eq("id", student_id).execute()
