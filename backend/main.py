@@ -1299,8 +1299,37 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
                 continue
                 
             next_class = classes[i + 1]
-            update_res = admin_client.table("students").update({"class_id": next_class["id"]}).eq("class_id", current["id"]).eq("is_active", True).execute()
-            promoted += len(update_res.data) if update_res.data else 0
+            students_res = admin_client.table("students")\
+                .select("id, term1_fee, term2_fee, term3_fee, old_dues, books_fee, transport_fee, has_books, has_transport")\
+                .eq("class_id", current["id"])\
+                .eq("is_active", True)\
+                .execute()
+                
+            if students_res.data:
+                for student in students_res.data:
+                    # Calculate outstanding balance
+                    t1 = float(student.get("term1_fee") or 0.0)
+                    t2 = float(student.get("term2_fee") or 0.0)
+                    t3 = float(student.get("term3_fee") or 0.0)
+                    books = float(student.get("books_fee") or 0.0) if student.get("has_books") else 0.0
+                    transport = float(student.get("transport_fee") or 0.0) if student.get("has_transport") else 0.0
+                    old_dues_curr = float(student.get("old_dues") or 0.0)
+                    new_old_dues = t1 + t2 + t3 + books + transport + old_dues_curr
+                    
+                    # Update student: class_id, carry forward outstanding fees as old_dues, reset term fees and options
+                    admin_client.table("students").update({
+                        "class_id": next_class["id"],
+                        "old_dues": new_old_dues,
+                        "term1_fee": 0.0,
+                        "term2_fee": 0.0,
+                        "term3_fee": 0.0,
+                        "books_fee": 0.0,
+                        "has_books": False,
+                        "transport_fee": 0.0,
+                        "has_transport": False,
+                        "updated_at": datetime.now().isoformat()
+                    }).eq("id", student["id"]).execute()
+                    promoted += 1
             
         clear_all_caches()
         return {
