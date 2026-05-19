@@ -505,7 +505,9 @@ def get_students(class_name: Optional[str] = None):
         if cached is not None:
             return cached
 
-        query = supabase.table("students").select(
+        admin_client = get_admin_client()
+
+        query = admin_client.table("students").select(
             """
             id, admission_number, full_name, class_id, roll_number, gender,
             father_name, father_phone, mother_name, mother_phone,
@@ -522,7 +524,7 @@ def get_students(class_name: Optional[str] = None):
             class_cache_key = f"class-id:{class_name}"
             class_id = cache_get(class_cache_key, CLASSES_CACHE_TTL_SECONDS)
             if class_id is None:
-                class_res = supabase.table("classes").select("id").eq("name", class_name).limit(1).execute()
+                class_res = admin_client.table("classes").select("id").eq("name", class_name).limit(1).execute()
                 class_id = class_res.data[0]["id"] if class_res.data else None
                 if class_id:
                     cache_set(class_cache_key, class_id, CLASSES_CACHE_TTL_SECONDS)

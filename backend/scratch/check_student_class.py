@@ -15,9 +15,8 @@ if not url or not key:
 supabase = create_client(url, key)
 
 try:
-    res = supabase.table("students").select("full_name, classes(name)").limit(5).execute()
-    print("Students with classes(name) using ANON key:")
-    for row in res.data:
-        print(row)
+    res = supabase.table("classes").select("*").execute()
+    print("Classes using ANON key:")
+    print(res.data)
 except Exception as e:
     print("Error:", e)
