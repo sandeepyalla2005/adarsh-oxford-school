@@ -411,6 +411,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (user) {
       try {
         localStorage.removeItem(`user_role_${user.id}`);
+        localStorage.removeItem('admin_last_activity');
       } catch (e) {}
     }
 
@@ -471,6 +472,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: mockUser
     });
   };
+
+  // Auto logout on inactivity (1 hour) specifically for admin
+  useEffect(() => {
+    if (!user || userRole !== 'admin') return;
+
+    const INACTIVITY_TIMEOUT = 60 * 60 * 1000; // 1 hour in ms
+    const STORAGE_KEY = 'admin_last_activity';
+
+    // Initialize/sync last activity time
+    const initActivity = () => {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (!stored) {
+        localStorage.setItem(STORAGE_KEY, Date.now().toString());
+      }
+    };
+    initActivity();
+
+    const handleActivity = () => {
+      localStorage.setItem(STORAGE_KEY, Date.now().toString());
+    };
+
+    // Events that indicate user activity
+    const activityEvents = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    
+    activityEvents.forEach(event => {
+      window.addEventListener(event, handleActivity);
+    });
+
+    const checkInterval = setInterval(() => {
+      const storedTime = localStorage.getItem(STORAGE_KEY);
+      const lastActivity = storedTime ? parseInt(storedTime, 10) : Date.now();
+      const elapsed = Date.now() - lastActivity;
+
+      if (elapsed >= INACTIVITY_TIMEOUT) {
+        console.log('🚪 Admin session expired due to inactivity of more than 1 hour. Logging out...');
+        // Clear activity key so we don't loop
+        localStorage.removeItem(STORAGE_KEY);
+        signOut();
+      }
+    }, 30000); // Check every 30 seconds
+
+    return () => {
+      activityEvents.forEach(event => {
+        window.removeEventListener(event, handleActivity);
+      });
+      clearInterval(checkInterval);
+    };
+  }, [user, userRole]);
 
   return (
     <AuthContext.Provider value={{
