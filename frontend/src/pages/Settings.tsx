@@ -178,6 +178,10 @@ export default function Settings() {
   };
 
   const handlePromoteStudents = async (otpOverride?: string) => {
+    // Guard: if a DOM event was accidentally passed (e.g. via onClick={fn}), discard it
+    if (otpOverride !== undefined && typeof otpOverride !== 'string') {
+      otpOverride = undefined;
+    }
     if (userRole === 'staff') {
       toast({
         variant: 'destructive',
@@ -590,7 +594,7 @@ export default function Settings() {
               <Button
                 type="button"
                 className="btn-oxford"
-                onClick={handlePromoteStudents}
+                onClick={() => handlePromoteStudents()}
                 disabled={isPromoting || isStaff}
               >
                 <ArrowRight className="mr-2 h-4 w-4" />
