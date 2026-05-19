@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
-import { getAuthRedirectPath } from '@/lib/portal';
+import { getAuthRedirectPath, getAppBuildMode } from '@/lib/portal';
 import { queryClient } from '@/lib/query-client';
 
 type UserRole = 'admin' | 'staff' | 'feeInCharge' | null;
@@ -278,8 +278,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             ),
           ]);
           const [role, foundProfile] = result;
-          const port = typeof window !== 'undefined' ? window.location.port : '';
-          const portalDefault: UserRole = port === '8082' ? 'feeInCharge' : port === '8081' ? 'staff' : 'admin';
+          const mode = getAppBuildMode();
+          const portalDefault: UserRole = mode === 'fee' ? 'feeInCharge' : mode === 'staff' ? 'staff' : 'admin';
           const finalRole = (role === 'staff' && foundProfile?.designation === 'Fee In-Charge') 
             ? 'feeInCharge' 
             : (role || getCachedRole(newSession.user.id) || portalDefault);
@@ -426,8 +426,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryClient.clear();
 
     // 3. Clear SPECIFIC portal data
+    const mode = getAppBuildMode();
     const runtimePort = typeof window !== 'undefined' ? window.location.port : '';
-    const currentStorageKey = `sb-adarsh-oxford-${runtimePort}`;
+    const currentStorageKey = `sb-adarsh-oxford-${mode}-${runtimePort}`;
     
     localStorage.removeItem(currentStorageKey);
     sessionStorage.clear();

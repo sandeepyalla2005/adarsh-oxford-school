@@ -549,15 +549,19 @@ def get_class_students(class_name: str, user=Depends(get_current_user)):
         if cached is not None:
             return cached
 
+        # Use admin_client to bypass RLS so the classes(name) foreign-key join
+        # is always resolved correctly regardless of RLS policies on the classes table.
+        admin_client = get_admin_client()
+
         class_cache_key = f"class-id:{normalized_class_name.lower()}"
         class_id = cache_get(class_cache_key, CLASSES_CACHE_TTL_SECONDS)
         if class_id is None:
-            class_res = supabase.table("classes").select("id").ilike("name", normalized_class_name).limit(1).execute()
+            class_res = admin_client.table("classes").select("id").ilike("name", normalized_class_name).limit(1).execute()
             class_id = class_res.data[0]["id"] if class_res.data else None
             if class_id:
                 cache_set(class_cache_key, class_id, CLASSES_CACHE_TTL_SECONDS)
 
-        query = supabase.table("students").select(
+        query = admin_client.table("students").select(
             """
             id, admission_number, full_name, class_id, roll_number, gender,
             father_name, father_phone, mother_name, mother_phone,
@@ -1155,6 +1159,11 @@ async def restore_student_api(student_id: str, user=Depends(get_current_user)):
         logger.error(f"Error restoring student {student_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/students/clear-cache")
+def clear_students_cache(user=Depends(get_current_user)):
+    clear_all_caches()
+    return {"status": "success", "message": "All caches cleared successfully"}
+
 # --- STUDENT DROPOUT APPROVAL WORKFLOW ---
 
 class DropoutRequest(BaseModel):
@@ -1176,17 +1185,7 @@ async def request_dropout(request: DropoutRequest, user=Depends(get_current_user
         if student_data.get("status") == "dropout":
             raise HTTPException(status_code=400, detail="Student is already marked as dropout")
 
-        # 2. Update status to 'dropout_pending'
-        res = admin_client.table("students").update({
-            "status": "dropout_pending",
-            "dropout_reason": f"PENDING APPROVAL: {request.reason}",
-            "updated_at": datetime.now().isoformat()
-        }).eq("id", request.student_id).execute()
-        
-        if not res.data:
-            raise HTTPException(status_code=500, detail="Failed to update student status")
-            
-        # 3. Calculate Pending Fees
+        # 2. Calculate Pending Fees
         t1 = float(student_data.get("term1_fee") or 0.0)
         t2 = float(student_data.get("term2_fee") or 0.0)
         t3 = float(student_data.get("term3_fee") or 0.0)
@@ -1197,6 +1196,16 @@ async def request_dropout(request: DropoutRequest, user=Depends(get_current_user
 
         if total_pending > 0:
             raise HTTPException(status_code=400, detail=f"Cannot dropout student with pending fees (₹{total_pending:,.2f}). Please clear or waive outstanding dues first!")
+
+        # 3. Update status to 'dropout_pending'
+        res = admin_client.table("students").update({
+            "status": "dropout_pending",
+            "dropout_reason": f"PENDING APPROVAL: {request.reason}",
+            "updated_at": datetime.now().isoformat()
+        }).eq("id", request.student_id).execute()
+        
+        if not res.data:
+            raise HTTPException(status_code=500, detail="Failed to update student status")
 
         # 4. Generate Enriched HTML Email Body
         email_html = f"""
@@ -1396,6 +1405,7 @@ async def approve_dropout(student_id: str, user=Depends(get_current_user)):
         if not res.data:
             raise HTTPException(status_code=500, detail="Failed to finalize dropout")
             
+        clear_all_caches()
         return {"status": "success", "message": f"Dropout for {student_data.get('full_name')} has been approved."}
     except HTTPException:
         raise
@@ -1423,6 +1433,7 @@ async def reject_dropout(student_id: str, user=Depends(get_current_user)):
         if not res.data:
             raise HTTPException(status_code=500, detail="Failed to reject dropout")
             
+        clear_all_caches()
         return {"status": "success", "message": "Dropout request rejected. Student remains active."}
     except HTTPException:
         raise

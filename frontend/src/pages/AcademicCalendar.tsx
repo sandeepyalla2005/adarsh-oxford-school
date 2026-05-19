@@ -395,8 +395,8 @@ export default function AcademicCalendar() {
                                             </div>
                                         </div>
                                     </div>
-                                    <CardContent className="p-0 bg-slate-50/50 flex items-center justify-center min-h-[650px] relative">
-                                        <div className="absolute inset-x-12 inset-y-12 bg-white rounded-[2rem] shadow-[0_40px_100px_-20px_rgba(0,0,0,0.1)] border border-slate-100 flex flex-col p-1">
+                                    <CardContent className="p-0 bg-slate-50/50 flex items-center justify-center min-h-[850px] relative">
+                                        <div className="absolute inset-x-4 inset-y-4 md:inset-x-8 md:inset-y-8 bg-white rounded-[2rem] shadow-[0_40px_100px_-20px_rgba(0,0,0,0.1)] border border-slate-100 flex flex-col p-1">
                                             <div className="h-12 border-b border-slate-50 flex items-center justify-between px-8 bg-slate-50/30 rounded-t-[2rem]">
                                                 <div className="flex gap-2">
                                                     <div className="h-2 w-2 rounded-full bg-red-400" />
@@ -414,8 +414,8 @@ export default function AcademicCalendar() {
                                                             <img src={currentCalendar.file_url} alt="Academic Calendar" className="w-full h-full object-contain p-4" />
                                                         ) : (
                                                             <iframe
-                                                                src={`${currentCalendar.file_url}#toolbar=0`}
-                                                                className="w-full h-full min-h-[600px] border-none"
+                                                                src={`${currentCalendar.file_url}#toolbar=0&navpanes=0&view=FitH`}
+                                                                className="w-full h-full min-h-[750px] border-none rounded-b-[2rem]"
                                                                 title="Academic Calendar"
                                                             />
                                                         );

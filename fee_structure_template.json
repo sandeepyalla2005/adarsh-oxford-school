@@ -1,0 +1,119 @@
+[
+  {
+    "class": "Nursery",
+    "academic_year": "2026-27",
+    "term1_fee": 12000,
+    "term2_fee": 12000,
+    "term3_fee": 12000,
+    "books_fee": 2000,
+    "transport_monthly_fee": 800
+  },
+  {
+    "class": "LKG",
+    "academic_year": "2026-27",
+    "term1_fee": 13000,
+    "term2_fee": 13000,
+    "term3_fee": 13000,
+    "books_fee": 2200,
+    "transport_monthly_fee": 900
+  },
+  {
+    "class": "UKG",
+    "academic_year": "2026-27",
+    "term1_fee": 13500,
+    "term2_fee": 13500,
+    "term3_fee": 13500,
+    "books_fee": 2300,
+    "transport_monthly_fee": 900
+  },
+  {
+    "class": "Class 1",
+    "academic_year": "2026-27",
+    "term1_fee": 15000,
+    "term2_fee": 15000,
+    "term3_fee": 15000,
+    "books_fee": 2500,
+    "transport_monthly_fee": 1000
+  },
+  {
+    "class": "Class 2",
+    "academic_year": "2026-27",
+    "term1_fee": 15500,
+    "term2_fee": 15500,
+    "term3_fee": 15500,
+    "books_fee": 2600,
+    "transport_monthly_fee": 1000
+  },
+  {
+    "class": "Class 3",
+    "academic_year": "2026-27",
+    "term1_fee": 16000,
+    "term2_fee": 16000,
+    "term3_fee": 16000,
+    "books_fee": 2700,
+    "transport_monthly_fee": 1100
+  },
+  {
+    "class": "Class 4",
+    "academic_year": "2026-27",
+    "term1_fee": 17000,
+    "term2_fee": 17000,
+    "term3_fee": 17000,
+    "books_fee": 2800,
+    "transport_monthly_fee": 1100
+  },
+  {
+    "class": "Class 5",
+    "academic_year": "2026-27",
+    "term1_fee": 18000,
+    "term2_fee": 18000,
+    "term3_fee": 18000,
+    "books_fee": 3000,
+    "transport_monthly_fee": 1200
+  },
+  {
+    "class": "Class 6",
+    "academic_year": "2026-27",
+    "term1_fee": 19000,
+    "term2_fee": 19000,
+    "term3_fee": 19000,
+    "books_fee": 3200,
+    "transport_monthly_fee": 1300
+  },
+  {
+    "class": "Class 7",
+    "academic_year": "2026-27",
+    "term1_fee": 19500,
+    "term2_fee": 19500,
+    "term3_fee": 19500,
+    "books_fee": 3300,
+    "transport_monthly_fee": 1300
+  },
+  {
+    "class": "Class 8",
+    "academic_year": "2026-27",
+    "term1_fee": 20000,
+    "term2_fee": 20000,
+    "term3_fee": 20000,
+    "books_fee": 3400,
+    "transport_monthly_fee": 1400
+  },
+  {
+    "class": "Class 9",
+    "academic_year": "2026-27",
+    "term1_fee": 21000,
+    "term2_fee": 21000,
+    "term3_fee": 21000,
+    "books_fee": 3500,
+    "transport_monthly_fee": 1400
+  },
+  {
+    "class": "Class 10",
+    "academic_year": "2026-27",
+    "term1_fee": 22000,
+    "term2_fee": 22000,
+    "term3_fee": 22000,
+    "books_fee": 3500,
+    "transport_monthly_fee": 1500
+  }
+]

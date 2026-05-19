@@ -1649,7 +1649,14 @@ export default function ClassStudents() {
                                                             )}
                                                         </div>
                                                         <div className="flex-1">
-                                                            <h3 className="font-medium">{getStudentName(student)}</h3>
+                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                <h3 className="font-medium">{getStudentName(student)}</h3>
+                                                                {student.status === 'dropout_pending' && (
+                                                                    <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50/50 text-[10px] font-bold py-0.5 px-2 rounded-full h-auto">
+                                                                        Pending Dropout
+                                                                    </Badge>
+                                                                )}
+                                                            </div>
                                                             <p className="text-sm text-muted-foreground">{getAdmissionNumber(student)}</p>
                                                         </div>
                                                         <Badge variant="secondary">{getClassName(student)}</Badge>

@@ -156,6 +156,21 @@ export default function AdminApprovals() {
         if (!isAdmin || !student?.id) return;
         setProcessingId(student.id);
         
+        // Optimistic UI updates - Instant Response!
+        const updatedPending = pendingStudents.filter(s => s.id !== student.id);
+        setPendingStudents(updatedPending);
+        
+        const cleanReason = student.dropout_reason?.replace("PENDING APPROVAL: ", "") || "Approved";
+        const approvedStudent: Student = {
+            ...student,
+            status: 'dropout',
+            is_active: false,
+            dropout_reason: cleanReason,
+            dropout_date: new Date().toISOString()
+        };
+        setConfirmedDropouts(prev => [approvedStudent, ...prev]);
+        setAllStudents(prev => prev.map(s => s.id === student.id ? approvedStudent : s));
+        
         try {
             const resp = await apiFetch(`/api/students/approve-dropout/${student.id}`, {
                 method: 'POST',
@@ -167,6 +182,8 @@ export default function AdminApprovals() {
             fetchAllData();
         } catch (e: any) {
             toast({ variant: 'destructive', title: 'Error', description: e.message });
+            // Revert on error
+            fetchAllData();
         } finally {
             setProcessingId(null);
         }
@@ -175,6 +192,20 @@ export default function AdminApprovals() {
     const handleReject = async (student: Student) => {
         if (!isAdmin || !student?.id) return;
         setProcessingId(student.id);
+        
+        // Optimistic UI updates - Instant Response!
+        const updatedPending = pendingStudents.filter(s => s.id !== student.id);
+        setPendingStudents(updatedPending);
+        
+        const activeStudent: Student = {
+            ...student,
+            status: 'active',
+            is_active: true,
+            dropout_reason: null,
+            dropout_date: null
+        };
+        setAllStudents(prev => prev.map(s => s.id === student.id ? activeStudent : s));
+        setActiveCount(prev => prev + 1);
         
         try {
             const resp = await apiFetch(`/api/students/reject-dropout/${student.id}`, {
@@ -187,6 +218,8 @@ export default function AdminApprovals() {
             fetchAllData();
         } catch (e: any) {
             toast({ variant: 'destructive', title: 'Error', description: e.message });
+            // Revert on error
+            fetchAllData();
         } finally {
             setProcessingId(null);
         }

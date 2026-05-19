@@ -1,0 +1,6 @@
+admission_number,full_name,class,roll_number,gender,father_name,father_phone,mother_name,mother_phone,parent_mail_id,aadhaar_number,student_type,date_of_joining,dob,address,term1_fee,term2_fee,term3_fee,book_fee_option,books_fee,transport_fee_option,transport_fee,old_dues
+ADM001,Adarsh Kumar,Class 1,1,Male,Darshan Kumar,9876543210,Kiran Kumar,9876543211,adarsh@example.com,123456789012,new,2026-06-01,2020-05-15,123 Oxford Street,15000,15000,15000,yes,2500,yes,5000,0
+ADM002,Sandeep Yalla,Class 5,12,Male,Rao Yalla,9848022338,Sita Yalla,9848022339,sandeep@example.com,234567890123,old,2026-06-01,2016-08-20,456 Greenfield Road,18000,18000,18000,yes,3000,no,0,500
+ADM003,Priya Sharma,Class 3,5,Female,Rajesh Sharma,9000112233,Sunita Sharma,9000112244,priya@example.com,345678901234,new,2026-06-01,2018-03-10,789 Royal Heights,16000,16000,16000,no,0,yes,4000,0
+ADM004,Amit Patel,Nursery,8,Male,Vijay Patel,9111223344,Meena Patel,9111223355,amit@example.com,456789012345,new,2026-06-01,2022-09-05,12 Lotus Apartment,12000,12000,12000,yes,2000,no,0,0
+ADM005,Sneha Reddy,Class 10,24,Female,Prasad Reddy,9222334455,Latha Reddy,9222334466,sneha@example.com,567890123456,old,2026-06-01,2011-12-25,99 Cyber Towers,22000,22000,22000,yes,3500,yes,6000,1200
