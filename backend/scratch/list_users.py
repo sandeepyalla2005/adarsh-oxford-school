@@ -1,26 +1,29 @@
 import os
-from supabase import create_client, Client
+from supabase import create_client
+from dotenv import load_dotenv
 
-url = "https://dakdpmprzumtwyjshgap.supabase.co"
-key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRha2RwbXByenVtdHd5anNoZ2FwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDIyMjE1NSwiZXhwIjoyMDg1Nzk4MTU1fQ.8gzt3uaYthvF7AbGFlKegwOn88JHdkYgyfAjFZaxw2s"
+load_dotenv()
 
-supabase: Client = create_client(url, key)
+url = os.environ.get("SUPABASE_URL") or os.environ.get("VITE_SUPABASE_URL")
+service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SERVICE_ROLE_KEY")
 
-print("Listing all users and their details...")
+if not url or not service_key:
+    print("Missing Supabase URL or Service Role Key")
+    exit(1)
+
+supabase = create_client(url, service_key)
+
 try:
-    roles = supabase.table("user_roles").select("*").execute()
-    profiles = supabase.table("profiles").select("*").execute()
-    
-    profile_map = {p['user_id']: p for p in profiles.data}
-    
-    for r in roles.data:
-        uid = r['user_id']
-        role = r['role']
-        profile = profile_map.get(uid, {})
-        email = profile.get('email', 'No email')
-        name = profile.get('full_name', 'No name')
-        designation = profile.get('designation', 'No designation')
-        print(f"ID: {uid} | Email: {email} | Role: {role} | Designation: {designation}")
+    print("Fetching users from profiles...")
+    res = supabase.table("profiles").select("user_id, email, full_name, designation").execute()
+    print("Profiles:")
+    for row in res.data or []:
+        print(f"Name: {row.get('full_name')}, Email: {row.get('email')}, Designation: {row.get('designation')}, ID: {row.get('user_id')}")
         
+    print("\nFetching user roles...")
+    roles_res = supabase.table("user_roles").select("user_id, role").execute()
+    print("Roles:")
+    for row in roles_res.data or []:
+        print(f"User ID: {row.get('user_id')}, Role: {row.get('role')}")
 except Exception as e:
-    print(f"Error: {e}")
+    print("Error:", e)
