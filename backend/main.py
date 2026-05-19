@@ -508,16 +508,7 @@ def get_students(class_name: Optional[str] = None):
         admin_client = get_admin_client()
 
         query = admin_client.table("students").select(
-            """
-            id, admission_number, full_name, class_id, roll_number, gender,
-            father_name, father_phone, mother_name, mother_phone,
-            dob, aadhaar, address,
-            term1_fee, term2_fee, term3_fee,
-            has_books, books_fee, has_transport, transport_fee, old_dues,
-            parent_email, student_type, joining_date, profile_photo,
-            is_active, status, dropout_reason, dropout_date, created_at,
-            classes(name)
-            """
+            "id,admission_number,full_name,class_id,roll_number,gender,father_name,father_phone,mother_name,mother_phone,dob,aadhaar,address,term1_fee,term2_fee,term3_fee,has_books,books_fee,has_transport,transport_fee,old_dues,parent_email,student_type,joining_date,profile_photo,is_active,status,dropout_reason,dropout_date,created_at,classes(name)"
         ).eq("is_active", True)
         if class_name and class_name != "all":
             # First find class_id
@@ -564,16 +555,7 @@ def get_class_students(class_name: str, user=Depends(get_current_user)):
                 cache_set(class_cache_key, class_id, CLASSES_CACHE_TTL_SECONDS)
 
         query = admin_client.table("students").select(
-            """
-            id, admission_number, full_name, class_id, roll_number, gender,
-            father_name, father_phone, mother_name, mother_phone,
-            dob, aadhaar, address,
-            term1_fee, term2_fee, term3_fee,
-            has_books, books_fee, has_transport, transport_fee, old_dues,
-            parent_email, student_type, joining_date, profile_photo,
-            is_active, status, dropout_reason, dropout_date, created_at,
-            classes(name)
-            """
+            "id,admission_number,full_name,class_id,roll_number,gender,father_name,father_phone,mother_name,mother_phone,dob,aadhaar,address,term1_fee,term2_fee,term3_fee,has_books,books_fee,has_transport,transport_fee,old_dues,parent_email,student_type,joining_date,profile_photo,is_active,status,dropout_reason,dropout_date,created_at,classes(name)"
         ).order("full_name")
 
         if class_id:

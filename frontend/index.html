@@ -19,6 +19,19 @@
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:site" content="@AdarshOxford" />
   <meta name="twitter:image" content="/school-logo-official.png" />
+  <script>
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '0.0.0.0') {
+      const port = window.location.port;
+      const pathname = window.location.pathname;
+      if (pathname === '/' || pathname === '/index.html') {
+        if (port === '8081') {
+          window.location.replace('/staff.html');
+        } else if (port === '8082') {
+          window.location.replace('/fee.html');
+        }
+      }
+    }
+  </script>
 </head>
 
 <body data-portal-build="admin">

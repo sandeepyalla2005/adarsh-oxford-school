@@ -341,6 +341,16 @@ type AppShellProps = {
 };
 
 export function AppShell({ mode = "combined" }: AppShellProps) {
+  // In local development / localhost, dynamically detect the mode from port or path to support refreshing pages
+  // because the browser fallback requests index.html (which runs admin-main.js).
+  let resolvedMode = mode;
+  if (typeof window !== "undefined" && 
+      (window.location.hostname === "localhost" || 
+       window.location.hostname === "127.0.0.1" || 
+       window.location.hostname === "0.0.0.0")) {
+    resolvedMode = getAppBuildMode();
+  }
+
   return (
     <AppErrorBoundary>
       <QueryClientProvider client={queryClient}>
@@ -349,7 +359,7 @@ export function AppShell({ mode = "combined" }: AppShellProps) {
             <Toaster />
             <Sonner />
             <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-              <AppRoutes mode={mode} />
+              <AppRoutes mode={resolvedMode} />
             </BrowserRouter>
           </TooltipProvider>
         </AuthProvider>

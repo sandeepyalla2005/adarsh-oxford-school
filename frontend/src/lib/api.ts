@@ -82,3 +82,8 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
     headers,
   });
 }
+
+// Clear session cache on auth state changes to avoid stale/missing tokens
+supabase.auth.onAuthStateChange(() => {
+  _sessionCache = null;
+});

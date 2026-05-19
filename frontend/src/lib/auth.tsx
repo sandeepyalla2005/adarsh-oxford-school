@@ -40,6 +40,10 @@ const ROLE_FETCH_RETRIES = 2; // Keep 2 retries for extra robustness
 const ROLE_CACHE_KEY_PREFIX = 'user_role_';
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Module-level cache to deduplicate concurrent backend requests
+const inFlightRoleFetches = new Map<string, Promise<UserRole>>();
+const inFlightProfileQueries = new Map<string, Promise<Profile | null>>();
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -47,25 +51,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch profile for the current user
+  // Fetch profile for the current user (deduplicated)
   const fetchProfile = async (userId: string): Promise<Profile | null> => {
-    try {
-      const { data: profileList, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('user_id', userId)
-        .limit(1);
-
-      if (!error && profileList && profileList.length > 0) {
-        const foundProfile = profileList[0] as Profile;
-        setProfile(foundProfile);
-        return foundProfile;
-      }
-      return null;
-    } catch (err) {
-      console.error('Error fetching profile:', err);
-      return null;
+    const cachedPromise = inFlightProfileQueries.get(userId);
+    if (cachedPromise) {
+      return cachedPromise;
     }
+
+    const promise = (async () => {
+      try {
+        const { data: profileList, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('user_id', userId)
+          .limit(1);
+
+        if (!error && profileList && profileList.length > 0) {
+          const foundProfile = profileList[0] as Profile;
+          setProfile(foundProfile);
+          return foundProfile;
+        }
+        return null;
+      } catch (err) {
+        console.error('Error fetching profile:', err);
+        return null;
+      } finally {
+        inFlightProfileQueries.delete(userId);
+      }
+    })();
+
+    inFlightProfileQueries.set(userId, promise);
+    return promise;
   };
 
   const getCachedRole = (userId: string): UserRole => {
@@ -86,7 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (e) {}
   };
 
-  // Optimized fetch with safety timeout
+  // Optimized fetch with safety timeout and concurrent request deduplication
   const fetchUserRoleWithTimeout = async (userId: string, userObj?: User | null, timeoutMs = ROLE_FETCH_TIMEOUT): Promise<UserRole> => {
     console.log('Fetching role for ID:', userId);
 
@@ -106,49 +122,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }, timeoutMs)
     );
 
-    const roleFetchPromise = (async () => {
-      for (let attempt = 0; attempt <= ROLE_FETCH_RETRIES; attempt++) {
+    let roleFetchPromise = inFlightRoleFetches.get(userId);
+    if (!roleFetchPromise) {
+      roleFetchPromise = (async () => {
         try {
-          if (attempt > 0) console.log(`Retry attempt ${attempt} for role fetch...`);
-          
-          // Try RPC first (more secure/direct)
-          const { data, error } = await supabase.rpc('get_user_roles', {
-            p_user_id: userId
-          });
+          for (let attempt = 0; attempt <= ROLE_FETCH_RETRIES; attempt++) {
+            try {
+              if (attempt > 0) console.log(`Retry attempt ${attempt} for role fetch...`);
+              
+              // Try RPC first (more secure/direct)
+              const { data, error } = await supabase.rpc('get_user_roles', {
+                p_user_id: userId
+              });
 
-          let resolvedRole: UserRole = null;
+              let resolvedRole: UserRole = null;
 
-          if (error) {
-            // Fallback to direct table query
-            const { data: tableData, error: tableError } = await supabase
-              .from('user_roles')
-              .select('role')
-              .eq('user_id', userId);
+              if (error) {
+                // Fallback to direct table query
+                const { data: tableData, error: tableError } = await supabase
+                  .from('user_roles')
+                  .select('role')
+                  .eq('user_id', userId);
 
-            if (!tableError && tableData) {
-              const roles = tableData.map((r: any) => r.role as string);
-              if (roles.includes('admin')) resolvedRole = 'admin';
-              else if (roles.includes('feeInCharge')) resolvedRole = 'feeInCharge';
-              else if (roles.includes('staff')) resolvedRole = 'staff';
+                if (!tableError && tableData) {
+                  const roles = tableData.map((r: any) => r.role as string);
+                  if (roles.includes('admin')) resolvedRole = 'admin';
+                  else if (roles.includes('feeInCharge')) resolvedRole = 'feeInCharge';
+                  else if (roles.includes('staff')) resolvedRole = 'staff';
+                }
+              } else if (data) {
+                const rolesList = (data as any[] || []).map((r: any) =>
+                  (typeof r === 'string' ? r : (r.role || r)) as string
+                );
+                if (rolesList.includes('admin')) resolvedRole = 'admin';
+                else if (rolesList.includes('feeInCharge')) resolvedRole = 'feeInCharge';
+                else if (rolesList.includes('staff')) resolvedRole = 'staff';
+              }
+
+              if (resolvedRole) return resolvedRole;
+            } catch (err) {
+              console.error(`Role fetch attempt ${attempt} failed:`, err);
             }
-          } else if (data) {
-            const rolesList = (data as any[] || []).map((r: any) =>
-              (typeof r === 'string' ? r : (r.role || r)) as string
-            );
-            if (rolesList.includes('admin')) resolvedRole = 'admin';
-            else if (rolesList.includes('feeInCharge')) resolvedRole = 'feeInCharge';
-            else if (rolesList.includes('staff')) resolvedRole = 'staff';
+            // Small delay before retry
+            if (attempt < ROLE_FETCH_RETRIES) await new Promise(r => setTimeout(r, 1000 * attempt));
           }
-
-          if (resolvedRole) return resolvedRole;
-        } catch (err) {
-          console.error(`Role fetch attempt ${attempt} failed:`, err);
+          return null;
+        } finally {
+          inFlightRoleFetches.delete(userId);
         }
-        // Small delay before retry
-        if (attempt < ROLE_FETCH_RETRIES) await new Promise(r => setTimeout(r, 1000 * attempt));
-      }
-      return null;
-    })();
+      })();
+      inFlightRoleFetches.set(userId, roleFetchPromise);
+    }
 
     const winner = await Promise.race([roleFetchPromise, timeoutPromise]);
     return winner as UserRole;
