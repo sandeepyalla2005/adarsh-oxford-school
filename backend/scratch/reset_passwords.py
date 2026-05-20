@@ -15,7 +15,8 @@ supabase = create_client(url, service_key)
 
 users_to_reset = [
     {"email": "feeincharge@adarshoxford.com", "id": "8a274d46-94ef-4ae7-99a9-e5748fd26e52"},
-    {"email": "Oxford@feeincharge.com", "id": "0f1c302d-a906-4259-8d24-7d7d80ac7c27"}
+    {"email": "Oxford@feeincharge.com", "id": "0f1c302d-a906-4259-8d24-7d7d80ac7c27"},
+    {"email": "kushal@gmail.com", "id": "01971307-062f-43c1-a79c-8c8769a76cc9"}
 ]
 
 print("Resetting passwords...")

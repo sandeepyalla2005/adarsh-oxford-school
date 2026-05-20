@@ -6,7 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/lib/auth";
-import { getPortalDashboardPath, getPortalFromRole, portalPath, getPortalBasePath, getPortalFromPath, getPortalAuthPath, type PortalType } from "@/lib/portal";
+import { getPortalDashboardPath, getPortalFromRole, portalPath, getPortalBasePath, getPortalFromPath, getPortalAuthPath, type PortalType, getAppBuildMode } from "@/lib/portal";
 import PortalAuth from "./components/auth/PortalAuth";
 
 // Helper to handle ChunkLoadError by forcing a reload

@@ -10,11 +10,7 @@ key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SERVICE_ROL
 
 supabase = create_client(url, key)
 
-tables = ["students", "classes", "profiles", "user_roles", "fee_history", "academic_calendar", "wipe_requests", "audit_logs"]
-print("Checking known tables:")
-for t in tables:
-    try:
-        supabase.table(t).select("id").limit(1).execute()
-        print(f"  Table '{t}' exists.")
-    except Exception as e:
-        print(f"  Table '{t}' query failed: {e}")
+# Test count query without 'head'
+res = supabase.table("students").select("id", count="exact").eq("is_active", True).execute()
+print("Count returned:", res.count)
+print("Data length:", len(res.data))

@@ -1,0 +1,192 @@
+[
+  {
+    "id": "TC-AUTH-01",
+    "module": "Auth",
+    "scenario": "Admin login with valid credentials",
+    "expected": "Token returned successfully",
+    "actual": "Login successful, token returned",
+    "status": "Pass",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-AUTH-02",
+    "module": "Auth",
+    "scenario": "Staff login with valid credentials",
+    "expected": "Token returned successfully",
+    "actual": "Login successful, token returned",
+    "status": "Pass",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-AUTH-03",
+    "module": "Auth",
+    "scenario": "Fee In-Charge login with valid credentials",
+    "expected": "Token returned successfully",
+    "actual": "Login successful, token returned",
+    "status": "Pass",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-AUTH-04",
+    "module": "Auth",
+    "scenario": "Login with invalid password",
+    "expected": "Authentication fails (400)",
+    "actual": "Failed as expected: Status 400: {\"code\":400,\"error_code\":\"invalid_credentials\",\"msg\":\"Invalid login credentials\"}",
+    "status": "Pass",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-AUTH-05",
+    "module": "Auth",
+    "scenario": "Login with empty credentials",
+    "expected": "Authentication fails (400)",
+    "actual": "Failed as expected: Status 400: {\"code\":400,\"error_code\":\"validation_failed\",\"msg\":\"missing email or phone\"}",
+    "status": "Pass",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-RBAC-01",
+    "module": "RBAC",
+    "scenario": "Staff attempts to fetch pending wipes",
+    "expected": "Access denied or returns empty array",
+    "actual": "Returned status 200",
+    "status": "Pass",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-RBAC-02",
+    "module": "RBAC",
+    "scenario": "Staff attempts to promote students",
+    "expected": "403 Forbidden",
+    "actual": "Received 403 Forbidden",
+    "status": "Pass",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-RBAC-03",
+    "module": "RBAC",
+    "scenario": "Admin fetches pending wipes",
+    "expected": "200 OK list",
+    "actual": "Successfully loaded, status 200",
+    "status": "Pass",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-STUD-01",
+    "module": "Student Management",
+    "scenario": "Add student with missing mandatory fields",
+    "expected": "422 Unprocessable Entity",
+    "actual": "FastAPI validation rejected the payload with 422",
+    "status": "Pass",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-STUD-02",
+    "module": "Student Management",
+    "scenario": "Add student with valid fields",
+    "expected": "Student created successfully",
+    "actual": "Created student ID: 9ffaf894-7a8e-4679-8ec3-25fa8ac60f45",
+    "status": "Pass",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-STUD-03",
+    "module": "Student Management",
+    "scenario": "Search / View child information",
+    "expected": "Student present in class student list",
+    "actual": "Student found in list for Pre-Primary",
+    "status": "Pass",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-STUD-04",
+    "module": "Student Management",
+    "scenario": "Edit student details",
+    "expected": "Details updated successfully",
+    "actual": "Successfully updated name and roll number",
+    "status": "Pass",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-FEE-01",
+    "module": "Course Fee",
+    "scenario": "Collect Course fee payment for student",
+    "expected": "Payment recorded successfully",
+    "actual": "timed out",
+    "status": "Fail",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-FEE-02",
+    "module": "Books Fee",
+    "scenario": "Collect Books fee payment for student",
+    "expected": "Payment recorded successfully",
+    "actual": "timed out",
+    "status": "Fail",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-FEE-03",
+    "module": "Transport Fee",
+    "scenario": "Collect Transport fee payment for student",
+    "expected": "Payment recorded successfully",
+    "actual": "timed out",
+    "status": "Fail",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-FEE-04",
+    "module": "Fee Details",
+    "scenario": "Calculate course, books, and transport pending balance",
+    "expected": "Balance calculations correct in DB tables",
+    "actual": "Paid course: 5000.0, books: 1500.0, transport: 2000.0",
+    "status": "Pass",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-INT-01",
+    "module": "Integration",
+    "scenario": "New student propagates to Course, Books, and Transport lists",
+    "expected": "Student shows up in all lists",
+    "actual": "Confirmed student appears in class-students query",
+    "status": "Pass",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-INT-02",
+    "module": "Integration",
+    "scenario": "Payment receipt verification",
+    "expected": "Receipt matches name, amount, method, and date",
+    "actual": "Receipt verified: REC-COURSE-999 | cash | Rs. 5000.0",
+    "status": "Pass",
+    "remarks": "",
+    "logs": ""
+  },
+  {
+    "id": "TC-STUD-05",
+    "module": "Student Management",
+    "scenario": "Delete student",
+    "expected": "Student deleted successfully",
+    "actual": "Delete API returns 200",
+    "status": "Pass",
+    "remarks": "",
+    "logs": ""
+  }
+]

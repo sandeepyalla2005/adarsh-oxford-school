@@ -859,7 +859,7 @@ class PaymentCollectionRequest(BaseModel):
     receipt_number: str
 
 @app.post("/api/payments/collect")
-async def collect_payment(request: PaymentCollectionRequest, user=Depends(get_current_user)):
+async def collect_payment(request: PaymentCollectionRequest, background_tasks: BackgroundTasks, user=Depends(get_current_user)):
     try:
         admin_client = get_admin_client()
         
@@ -884,8 +884,11 @@ async def collect_payment(request: PaymentCollectionRequest, user=Depends(get_cu
         }
         if request.type == "course":
             payment_data["term"] = request.term
+        elif request.type == "transport":
+            payment_data["month"] = request.term
             
         # 3. Insert record
+        logger.info(f"Payment data to insert into {table}: {payment_data}")
         res = admin_client.table(table).insert(payment_data).execute()
         if not res.data:
             raise HTTPException(status_code=500, detail="Failed to record payment")
@@ -907,7 +910,7 @@ async def collect_payment(request: PaymentCollectionRequest, user=Depends(get_cu
             # 5. Send SMS to Parent
             if phone:
                 sms_msg = f"Dear Parent, fee payment of Rs.{request.amount} for {student_name} ({class_name}) has been received. Receipt: {request.receipt_number}. Thank you - Adarsh Oxford School"
-                send_sms(phone, sms_msg)
+                background_tasks.add_task(send_sms, phone, sms_msg)
                 
             # 6. Build receipt and send HTML receipt email to School
             now = datetime.now()
@@ -953,7 +956,7 @@ async def collect_payment(request: PaymentCollectionRequest, user=Depends(get_cu
 
             school_email = os.environ.get("WIPE_NOTIFICATION_EMAIL", "sandeep.yalla506@gmail.com")
             email_subject = f"Fee Receipt: {student_name} – ₹{request.amount:,.0f} ({request.receipt_number})"
-            send_email(school_email, email_subject, plain_text, html_body=receipt_html)
+            background_tasks.add_task(send_email, school_email, email_subject, plain_text, html_body=receipt_html)
             
         return {"status": "success", "receipt_number": request.receipt_number}
         
@@ -1480,11 +1483,14 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
         promoted = 0
         skipped = 0
         
-        for i in range(len(classes)):
+        # Loop in reverse order (highest sort_order to lowest sort_order)
+        # to prevent unique constraint (class_id, admission_number) violations
+        # during promotion of students into currently occupied target classes.
+        for i in range(len(classes) - 1, -1, -1):
             current = classes[i]
             if i + 1 >= len(classes):
                 # Highest class, count as skipped
-                count_res = admin_client.table("students").select("id", count="exact", head=True).eq("class_id", current["id"]).eq("is_active", True).execute()
+                count_res = admin_client.table("students").select("id", count="exact").eq("class_id", current["id"]).eq("is_active", True).execute()
                 skipped += count_res.count or 0
                 continue
                 
@@ -1818,6 +1824,7 @@ async def get_pending_wipes(user=Depends(get_current_user)):
         if getattr(user, "role", None) != "admin":
             return [] # Non-admins see nothing
         
+        admin_client = get_admin_client()
         # Fetch from database instead of memory
         now = datetime.now().isoformat()
         w_res = admin_client.table("wipe_requests").select("*, profiles(full_name)").is_("consumed_at", "null").gt("expires_at", now).execute()
