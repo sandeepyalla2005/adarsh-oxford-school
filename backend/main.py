@@ -1496,7 +1496,7 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
                 
             next_class = classes[i + 1]
             students_res = admin_client.table("students")\
-                .select("id, term1_fee, term2_fee, term3_fee, old_dues, books_fee, transport_fee, has_books, has_transport")\
+                .select("id, admission_number, term1_fee, term2_fee, term3_fee, old_dues, books_fee, transport_fee, has_books, has_transport")\
                 .eq("class_id", current["id"])\
                 .eq("is_active", True)\
                 .execute()
@@ -1512,20 +1512,41 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
                     old_dues_curr = float(student.get("old_dues") or 0.0)
                     new_old_dues = t1 + t2 + t3 + books + transport + old_dues_curr
                     
-                    # Update student: class_id, carry forward outstanding fees as old_dues, reset term fees and options
-                    admin_client.table("students").update({
-                        "class_id": next_class["id"],
-                        "old_dues": new_old_dues,
-                        "term1_fee": 0.0,
-                        "term2_fee": 0.0,
-                        "term3_fee": 0.0,
-                        "books_fee": 0.0,
-                        "has_books": False,
-                        "transport_fee": 0.0,
-                        "has_transport": False,
-                        "updated_at": datetime.now().isoformat()
-                    }).eq("id", student["id"]).execute()
-                    promoted += 1
+                    try:
+                        # Update student: class_id, carry forward outstanding fees as old_dues, reset term fees and options
+                        admin_client.table("students").update({
+                            "class_id": next_class["id"],
+                            "old_dues": new_old_dues,
+                            "term1_fee": 0.0,
+                            "term2_fee": 0.0,
+                            "term3_fee": 0.0,
+                            "books_fee": 0.0,
+                            "has_books": False,
+                            "transport_fee": 0.0,
+                            "has_transport": False,
+                            "updated_at": datetime.now().isoformat()
+                        }).eq("id", student["id"]).execute()
+                        promoted += 1
+                    except Exception as e:
+                        if '23505' in str(e):
+                            orig_adm = student.get('admission_number') or f"UNKNOWN-{str(student['id'])[:4]}"
+                            new_adm = f"{orig_adm}-DUP-{str(student['id'])[:6]}"
+                            admin_client.table("students").update({
+                                "class_id": next_class["id"],
+                                "admission_number": new_adm,
+                                "old_dues": new_old_dues,
+                                "term1_fee": 0.0,
+                                "term2_fee": 0.0,
+                                "term3_fee": 0.0,
+                                "books_fee": 0.0,
+                                "has_books": False,
+                                "transport_fee": 0.0,
+                                "has_transport": False,
+                                "updated_at": datetime.now().isoformat()
+                            }).eq("id", student["id"]).execute()
+                            promoted += 1
+                        else:
+                            raise e
             
         clear_all_caches()
         return {
