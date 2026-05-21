@@ -1495,13 +1495,20 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
                 continue
                 
             next_class = classes[i + 1]
+            
+            # Fetch existing admission numbers in next_class to proactively prevent duplicates
+            existing_res = admin_client.table("students").select("admission_number").eq("class_id", next_class["id"]).execute()
+            existing_admissions = {s["admission_number"] for s in existing_res.data if s.get("admission_number")}
+
+            # Fetch all active students in the current class with full rows for upsert
             students_res = admin_client.table("students")\
-                .select("id, admission_number, term1_fee, term2_fee, term3_fee, old_dues, books_fee, transport_fee, has_books, has_transport")\
+                .select("*")\
                 .eq("class_id", current["id"])\
                 .eq("is_active", True)\
                 .execute()
                 
             if students_res.data:
+                batch = []
                 for student in students_res.data:
                     # Calculate outstanding balance
                     t1 = float(student.get("term1_fee") or 0.0)
@@ -1512,41 +1519,35 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
                     old_dues_curr = float(student.get("old_dues") or 0.0)
                     new_old_dues = t1 + t2 + t3 + books + transport + old_dues_curr
                     
-                    try:
-                        # Update student: class_id, carry forward outstanding fees as old_dues, reset term fees and options
-                        admin_client.table("students").update({
-                            "class_id": next_class["id"],
-                            "old_dues": new_old_dues,
-                            "term1_fee": 0.0,
-                            "term2_fee": 0.0,
-                            "term3_fee": 0.0,
-                            "books_fee": 0.0,
-                            "has_books": False,
-                            "transport_fee": 0.0,
-                            "has_transport": False,
-                            "updated_at": datetime.now().isoformat()
-                        }).eq("id", student["id"]).execute()
-                        promoted += 1
-                    except Exception as e:
-                        if '23505' in str(e):
-                            orig_adm = student.get('admission_number') or f"UNKNOWN-{str(student['id'])[:4]}"
-                            new_adm = f"{orig_adm}-DUP-{str(student['id'])[:6]}"
-                            admin_client.table("students").update({
-                                "class_id": next_class["id"],
-                                "admission_number": new_adm,
-                                "old_dues": new_old_dues,
-                                "term1_fee": 0.0,
-                                "term2_fee": 0.0,
-                                "term3_fee": 0.0,
-                                "books_fee": 0.0,
-                                "has_books": False,
-                                "transport_fee": 0.0,
-                                "has_transport": False,
-                                "updated_at": datetime.now().isoformat()
-                            }).eq("id", student["id"]).execute()
-                            promoted += 1
-                        else:
-                            raise e
+                    orig_adm = student.get("admission_number") or f"UNKNOWN-{str(student['id'])[:4]}"
+                    new_adm = orig_adm
+                    
+                    if new_adm in existing_admissions:
+                        new_adm = f"{orig_adm}-DUP-{str(student['id'])[:6]}"
+                    
+                    # Prevent intra-batch duplicates
+                    existing_admissions.add(new_adm)
+                    
+                    student["class_id"] = next_class["id"]
+                    student["admission_number"] = new_adm
+                    student["old_dues"] = new_old_dues
+                    student["term1_fee"] = 0.0
+                    student["term2_fee"] = 0.0
+                    student["term3_fee"] = 0.0
+                    student["books_fee"] = 0.0
+                    student["has_books"] = False
+                    student["transport_fee"] = 0.0
+                    student["has_transport"] = False
+                    student["updated_at"] = datetime.now().isoformat()
+                    
+                    batch.append(student)
+                
+                # Bulk upsert in chunks of 500
+                chunk_size = 500
+                for j in range(0, len(batch), chunk_size):
+                    chunk = batch[j:j+chunk_size]
+                    admin_client.table("students").upsert(chunk).execute()
+                    promoted += len(chunk)
             
         clear_all_caches()
         return {
