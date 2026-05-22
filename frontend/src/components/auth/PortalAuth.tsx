@@ -183,7 +183,7 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
       const response = await apiFetch('/api/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: forgotEmail, role: selectedRole }),
+        body: JSON.stringify({ email: normalizedForgotEmail, role: selectedRole }),
       });
       
       const data = await response.json();
@@ -228,7 +228,7 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          email: forgotEmail, 
+          email: normalizedForgotEmail, 
           otp, 
           new_password: newPass,
           role: selectedRole
