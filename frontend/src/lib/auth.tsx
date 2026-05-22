@@ -3,6 +3,7 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { getAuthRedirectPath, getAppBuildMode } from '@/lib/portal';
 import { queryClient } from '@/lib/query-client';
+import { toast } from '@/hooks/use-toast';
 
 type UserRole = 'admin' | 'staff' | 'feeInCharge' | null;
 
@@ -219,6 +220,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         if (existingSession) {
+          const userEmail = existingSession.user.email;
+          const provider = existingSession.user.app_metadata?.provider;
+          const isGoogle = provider === 'google' || existingSession.user.identities?.some(id => id.provider === 'google');
+          const buildMode = getAppBuildMode();
+
+          if (buildMode === 'admin' && isGoogle && userEmail && !userEmail.startsWith('sandeep.yalla506@gmail')) {
+            console.warn('Unauthorized Google session active on admin portal, logging out:', userEmail);
+            toast({
+              variant: "destructive",
+              title: "Access Denied",
+              description: "Only the authorized email (sandeep.yalla506@gmail.com) can log in with Google on the Admin portal."
+            });
+            clearStaleSupabaseTokens();
+            setIsLoading(false);
+            supabase.auth.signOut();
+            return;
+          }
+
+          if (buildMode === 'fee' && isGoogle && userEmail && !userEmail.startsWith('sandeep.yalla506@gmail') && !userEmail.startsWith('schooloxford2005@gmail')) {
+            console.warn('Unauthorized Google session active on Accounts portal, logging out:', userEmail);
+            toast({
+              variant: "destructive",
+              title: "Access Denied",
+              description: "Only the authorized emails (sandeep.yalla506@gmail.com, schooloxford2005@gmail.com) can log in with Google on the Accounts portal."
+            });
+            clearStaleSupabaseTokens();
+            setIsLoading(false);
+            supabase.auth.signOut();
+            return;
+          }
+
           console.log('✅ Found existing session for:', existingSession.user.email);
           setSession(existingSession);
           setUser(existingSession.user);
@@ -279,6 +311,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       console.log('🔄 Auth state changed:', event);
+
+      if (newSession?.user) {
+        const userEmail = newSession.user.email;
+        const provider = newSession.user.app_metadata?.provider;
+        const isGoogle = provider === 'google' || newSession.user.identities?.some(id => id.provider === 'google');
+        const buildMode = getAppBuildMode();
+
+        if (buildMode === 'admin' && isGoogle && userEmail && !userEmail.startsWith('sandeep.yalla506@gmail')) {
+          console.warn('Unauthorized Google login attempt on admin portal, logging out:', userEmail);
+          toast({
+            variant: "destructive",
+            title: "Access Denied",
+            description: "Only the authorized email (sandeep.yalla506@gmail.com) can log in with Google on the Admin portal."
+          });
+          setUser(null);
+          setSession(null);
+          setUserRole(null);
+          setProfile(null);
+          setIsLoading(false);
+          supabase.auth.signOut();
+          return;
+        }
+
+        if (buildMode === 'fee' && isGoogle && userEmail && !userEmail.startsWith('sandeep.yalla506@gmail') && !userEmail.startsWith('schooloxford2005@gmail')) {
+          console.warn('Unauthorized Google login attempt on Accounts portal, logging out:', userEmail);
+          toast({
+            variant: "destructive",
+            title: "Access Denied",
+            description: "Only the authorized emails (sandeep.yalla506@gmail.com, schooloxford2005@gmail.com) can log in with Google on the Accounts portal."
+          });
+          setUser(null);
+          setSession(null);
+          setUserRole(null);
+          setProfile(null);
+          setIsLoading(false);
+          supabase.auth.signOut();
+          return;
+        }
+      }
 
       setSession(newSession);
       setUser(newSession?.user ?? null);

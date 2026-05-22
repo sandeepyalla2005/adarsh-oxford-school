@@ -67,12 +67,20 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showForgotModal, setShowForgotModal] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotEmail, setForgotEmail] = useState(
+    (portalType === 'admin' || portalType === 'fee') ? 'sandeep.yalla506@gmail.com' : ''
+  );
   const [forgotStep, setForgotStep] = useState<'request' | 'reset'>('request');
   const [otp, setOtp] = useState('');
   const [newPass, setNewPass] = useState('');
   
-  const { signIn, user, userRole } = useAuth();
+  const { signIn, signInWithGoogle, user, userRole } = useAuth();
+
+  useEffect(() => {
+    if (showForgotModal && (portalType === 'admin' || portalType === 'fee') && !forgotEmail) {
+      setForgotEmail('sandeep.yalla506@gmail.com');
+    }
+  }, [showForgotModal, portalType]);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -92,7 +100,8 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
 
     try {
       setIsSubmitting(true);
-      const result = loginSchema.safeParse({ email: username, password });
+      const cleanUsername = username.trim().toLowerCase();
+      const result = loginSchema.safeParse({ email: cleanUsername, password });
       
       if (!result.success) {
         toast({
@@ -103,7 +112,7 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
         return;
       }
 
-      const { error } = await signIn(username, password, selectedRole);
+      const { error } = await signIn(cleanUsername, password, selectedRole);
 
       if (error) {
         toast({
@@ -128,10 +137,43 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    try {
+      setIsSubmitting(true);
+      const { error } = await signInWithGoogle();
+      if (error) {
+        toast({
+          variant: "destructive",
+          title: "Google Sign-in Failed",
+          description: error.message,
+        });
+      }
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: err.message || "An unexpected error occurred during Google Sign-in",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     try {
+      const normalizedForgotEmail = forgotEmail.trim().toLowerCase();
+      if (portalType === 'admin') {
+        if (!normalizedForgotEmail.startsWith('sandeep.yalla506@gmail')) {
+          throw new Error('Password recovery is only allowed for the authorized admin email.');
+        }
+      } else if (portalType === 'fee') {
+        if (!normalizedForgotEmail.startsWith('sandeep.yalla506@gmail') && !normalizedForgotEmail.startsWith('schooloxford2005@gmail')) {
+          throw new Error('Password recovery is only allowed for authorized fee in-charge emails.');
+        }
+      }
+
       const response = await apiFetch('/api/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -141,7 +183,7 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
       const data = await response.json();
       
       if (!response.ok || data.error) {
-        throw new Error(data.error || 'Failed to send OTP');
+        throw new Error(data.error || data.detail || 'Failed to send OTP');
       }
       
       toast({
@@ -164,6 +206,17 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
     e.preventDefault();
     setIsSubmitting(true);
     try {
+      const normalizedForgotEmail = forgotEmail.trim().toLowerCase();
+      if (portalType === 'admin') {
+        if (!normalizedForgotEmail.startsWith('sandeep.yalla506@gmail')) {
+          throw new Error('Password reset is only allowed for the authorized admin email.');
+        }
+      } else if (portalType === 'fee') {
+        if (!normalizedForgotEmail.startsWith('sandeep.yalla506@gmail') && !normalizedForgotEmail.startsWith('schooloxford2005@gmail')) {
+          throw new Error('Password reset is only allowed for authorized fee in-charge emails.');
+        }
+      }
+
       const response = await apiFetch('/api/auth/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -178,7 +231,7 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
       const data = await response.json();
       
       if (!response.ok || data.error) {
-        throw new Error(data.error || 'Failed to reset password');
+        throw new Error(data.error || data.detail || 'Failed to reset password');
       }
       
       toast({
@@ -367,6 +420,7 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
                   <Button 
                     type="button" 
                     variant="outline" 
+                    onClick={handleGoogleSignIn}
                     className="w-full h-14 border-slate-200 rounded-xl hover:bg-slate-50 transition-all hover:shadow-md"
                   >
                     <img 
@@ -409,9 +463,20 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
                   placeholder="name@gmail.com"
                   value={forgotEmail}
                   onChange={(e) => setForgotEmail(e.target.value)}
-                  className="rounded-xl"
+                  className="rounded-xl bg-slate-50 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                  disabled={portalType === 'admin'}
                   required
                 />
+                {portalType === 'admin' && (
+                  <p className="text-xs text-slate-500 font-medium">
+                    Password recovery OTP will only be sent to the authorized admin email.
+                  </p>
+                )}
+                {portalType === 'fee' && (
+                  <p className="text-xs text-slate-500 font-medium">
+                    Password recovery OTP will only be sent to authorized fee in-charge emails (sandeep.yalla506@gmail.com or schooloxford2005@gmail.com).
+                  </p>
+                )}
               </div>
               <Button type="submit" disabled={isSubmitting} className="w-full bg-[#002147] rounded-xl">
                 {isSubmitting ? 'Sending...' : 'Send OTP'}

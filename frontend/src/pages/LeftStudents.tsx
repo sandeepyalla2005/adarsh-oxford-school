@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { Search, IndianRupee, FileText, Download, CheckCircle, AlertTriangle, UserMinus } from 'lucide-react';
+import { Search, IndianRupee, FileText, Download, CheckCircle, AlertTriangle, UserMinus, Pencil, RefreshCw } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/lib/auth';
 import { useToast } from '@/hooks/use-toast';
@@ -27,6 +27,58 @@ export default function LeftStudents() {
   const [collectRemarks, setCollectRemarks] = useState('');
   const [isCollecting, setIsCollecting] = useState(false);
 
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isEditingFee, setIsEditingFee] = useState(false);
+  const [editFeeForm, setEditFeeForm] = useState({
+    pending_term_fee: '',
+    pending_transport_fee: '',
+    pending_books_fee: '',
+    old_due: ''
+  });
+
+  const openEditModal = (record: any) => {
+    setSelectedRecord(record);
+    setEditFeeForm({
+      pending_term_fee: record.pending_term_fee || '0',
+      pending_transport_fee: record.pending_transport_fee || '0',
+      pending_books_fee: record.pending_books_fee || '0',
+      old_due: record.old_due || '0'
+    });
+    setIsEditModalOpen(true);
+  };
+
+  const handleEditFee = async () => {
+    if (!selectedRecord) return;
+    setIsEditingFee(true);
+    try {
+      const resp = await apiFetch('/api/left-students/edit-fee', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          record_id: selectedRecord.id,
+          pending_term_fee: parseFloat(editFeeForm.pending_term_fee) || 0,
+          pending_transport_fee: parseFloat(editFeeForm.pending_transport_fee) || 0,
+          pending_books_fee: parseFloat(editFeeForm.pending_books_fee) || 0,
+          old_due: parseFloat(editFeeForm.old_due) || 0
+        })
+      });
+
+      if (!resp.ok) {
+        const error = await resp.json();
+        throw new Error(error.detail || 'Failed to update fee');
+      }
+
+      toast({ title: 'Success', description: 'Fee details updated successfully' });
+      setIsEditModalOpen(false);
+      refetch();
+      queryClient.invalidateQueries({ queryKey: ['left-students-dashboard'] });
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Update Failed', description: err.message });
+    } finally {
+      setIsEditingFee(false);
+    }
+  };
+
   const { data: leftStudents = [], isLoading, refetch } = useQuery({
     queryKey: ['left-students', search, statusFilter],
     queryFn: async () => {
@@ -40,6 +92,19 @@ export default function LeftStudents() {
       return data.data;
     },
     refetchOnWindowFocus: false,
+    refetchInterval: 5000,
+  });
+
+  const { data: dashboardStats, refetch: refetchStats } = useQuery({
+    queryKey: ['left-students-dashboard'],
+    queryFn: async () => {
+      const resp = await apiFetch('/api/left-students/dashboard');
+      if (!resp.ok) return null;
+      const json = await resp.json();
+      return json.data;
+    },
+    refetchOnWindowFocus: false,
+    refetchInterval: 5000,
   });
 
   const handleCollect = async () => {
@@ -134,21 +199,65 @@ export default function LeftStudents() {
               />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-40 rounded-xl bg-white border-slate-200">
+              <SelectTrigger className="w-48 rounded-xl bg-white border-slate-200">
                 <SelectValue placeholder="All Status" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Leaving Status</SelectItem>
                 <SelectItem value="dropout">Dropout</SelectItem>
-                <SelectItem value="tc_issued">TC Issued</SelectItem>
+                <SelectItem value="tc_issued">TC Issued / Eligible (0 Due)</SelectItem>
                 <SelectItem value="completed_10th">Completed 10th</SelectItem>
               </SelectContent>
             </Select>
-            <Button onClick={() => refetch()} className="rounded-xl btn-oxford h-10 px-6">
+            <Button onClick={() => { refetch(); refetchStats(); }} className="rounded-xl btn-oxford h-10 px-6">
               Search
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                refetch();
+                refetchStats();
+              }}
+              className="rounded-xl border-slate-200 bg-white h-10 px-4 flex items-center gap-2 hover:bg-slate-50 text-slate-700 font-medium"
+              title="Manual Refresh"
+            >
+              <RefreshCw className="h-4 w-4 text-slate-500" />
+              <span>Refresh</span>
             </Button>
           </div>
         </div>
+
+        {dashboardStats && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-500">Total Left Students</p>
+                <p className="text-2xl font-bold text-slate-800 mt-1">{dashboardStats.total_left_students}</p>
+              </div>
+              <div className="h-12 w-12 bg-blue-50 rounded-xl flex items-center justify-center">
+                <UserMinus className="h-6 w-6 text-blue-600" />
+              </div>
+            </div>
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-500">Total Pending Dues</p>
+                <p className="text-2xl font-bold text-red-600 mt-1">{formatCurrency(dashboardStats.unpaid_amount || 0)}</p>
+              </div>
+              <div className="h-12 w-12 bg-red-50 rounded-xl flex items-center justify-center">
+                <IndianRupee className="h-6 w-6 text-red-600" />
+              </div>
+            </div>
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-500">Total T.C Issued</p>
+                <p className="text-2xl font-bold text-emerald-600 mt-1">{dashboardStats.tc_issued_count || 0}</p>
+              </div>
+              <div className="h-12 w-12 bg-emerald-50 rounded-xl flex items-center justify-center">
+                <FileText className="h-6 w-6 text-emerald-600" />
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
           <div className="overflow-x-auto">
@@ -210,7 +319,7 @@ export default function LeftStudents() {
                         </td>
                         <td className="px-6 py-4 text-right">
                           <div className="flex justify-end gap-2">
-                            {record.leaving_status !== 'tc_issued' && (
+                            {record.leaving_status !== 'tc_issued' && currentDue <= 0 && (
                               <Button
                                 onClick={async () => {
                                   if (window.confirm(`Issue T.C to ${student.full_name}?`)) {
@@ -244,6 +353,17 @@ export default function LeftStudents() {
                               <IndianRupee className="h-4 w-4 mr-2" />
                               Collect
                             </Button>
+                            {(isAdmin || userRole === 'feeInCharge') && (
+                              <Button
+                                onClick={() => openEditModal(record)}
+                                size="sm"
+                                variant="outline"
+                                className="rounded-lg px-3 border-slate-300 text-slate-700 hover:bg-slate-100"
+                                title="Edit Fee"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -331,6 +451,77 @@ export default function LeftStudents() {
             </Button>
             <Button onClick={handleCollect} disabled={isCollecting} className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl px-8 font-bold shadow-md shadow-emerald-600/20">
               {isCollecting ? 'Processing...' : 'Confirm Payment'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden border-0 rounded-2xl shadow-2xl">
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white">
+            <DialogHeader>
+              <DialogTitle className="text-2xl font-bold flex items-center gap-2">
+                <Pencil className="h-6 w-6 opacity-80" />
+                Edit Pending Fee
+              </DialogTitle>
+              <DialogDescription className="text-blue-50">
+                Modify fee breakdown for {selectedRecord?.students?.full_name}
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+          
+          <div className="p-6 space-y-4 bg-white">
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700">Pending Term Fee</label>
+              <Input
+                type="number"
+                value={editFeeForm.pending_term_fee}
+                onChange={(e) => setEditFeeForm({ ...editFeeForm, pending_term_fee: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700">Pending Transport Fee</label>
+              <Input
+                type="number"
+                value={editFeeForm.pending_transport_fee}
+                onChange={(e) => setEditFeeForm({ ...editFeeForm, pending_transport_fee: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700">Pending Books Fee</label>
+              <Input
+                type="number"
+                value={editFeeForm.pending_books_fee}
+                onChange={(e) => setEditFeeForm({ ...editFeeForm, pending_books_fee: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700">Old Dues</label>
+              <Input
+                type="number"
+                value={editFeeForm.old_due}
+                onChange={(e) => setEditFeeForm({ ...editFeeForm, old_due: e.target.value })}
+              />
+            </div>
+            <div className="pt-4 border-t border-slate-100 flex justify-between items-center text-lg font-bold">
+              <span>New Total:</span>
+              <span className="text-blue-600">
+                {formatCurrency(
+                  (parseFloat(editFeeForm.pending_term_fee) || 0) +
+                  (parseFloat(editFeeForm.pending_transport_fee) || 0) +
+                  (parseFloat(editFeeForm.pending_books_fee) || 0) +
+                  (parseFloat(editFeeForm.old_due) || 0)
+                )}
+              </span>
+            </div>
+          </div>
+          
+          <DialogFooter className="bg-slate-50 p-4 border-t border-slate-100 sm:justify-end">
+            <Button variant="outline" onClick={() => setIsEditModalOpen(false)} className="rounded-xl px-6">
+              Cancel
+            </Button>
+            <Button onClick={handleEditFee} disabled={isEditingFee} className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-8 font-bold shadow-md shadow-blue-600/20">
+              {isEditingFee ? 'Saving...' : 'Save Changes'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1100,25 +1100,27 @@ async def mark_student_dropout(student_id: str, request: DropoutConfirmRequest, 
         old_dues = float(student_data.get("old_dues") or 0.0)
         total_pending = t1 + t2 + t3 + books + transport + old_dues
         
-        if total_pending > 0:
-            # Create a left_student_fee_records entry
-            left_record = {
-                "student_id": student_id,
-                "leaving_status": "dropout",
-                "leaving_reason": request.reason,
-                "pending_term_fee": t1 + t2 + t3,
-                "pending_transport_fee": transport,
-                "pending_books_fee": books,
-                "old_due": old_dues,
-                "total_pending_amount": total_pending,
-                "recovery_status": "UNPAID",
-                "recovered_amount": 0.0
-            }
-            # Attempt to insert, ignore if table doesn't exist yet (user hasn't run migration)
-            try:
+        left_record = {
+            "student_id": student_id,
+            "leaving_status": "dropout",
+            "leaving_reason": request.reason,
+            "pending_term_fee": t1 + t2 + t3,
+            "pending_transport_fee": transport,
+            "pending_books_fee": books,
+            "old_due": old_dues,
+            "total_pending_amount": total_pending,
+            "recovery_status": "UNPAID" if total_pending > 0 else "FULLY_PAID",
+            "recovered_amount": 0.0
+        }
+        # Attempt to insert or update
+        try:
+            existing = admin_client.table("left_student_fee_records").select("id").eq("student_id", student_id).execute()
+            if existing.data:
+                admin_client.table("left_student_fee_records").update(left_record).eq("student_id", student_id).execute()
+            else:
                 admin_client.table("left_student_fee_records").insert(left_record).execute()
-            except Exception as e:
-                logger.warning(f"Could not insert into left_student_fee_records (migration might be pending): {e}")
+        except Exception as e:
+            logger.warning(f"Could not insert into left_student_fee_records (migration might be pending): {e}")
             
         res = admin_client.table("students").update({
             "status": "dropout",
@@ -1400,25 +1402,27 @@ async def approve_dropout(student_id: str, user=Depends(get_current_user)):
         old_dues = float(student_data.get("old_dues") or 0.0)
         total_pending = t1 + t2 + t3 + books + transport + old_dues
 
-        if total_pending > 0:
-            # Create a left_student_fee_records entry
-            left_record = {
-                "student_id": student_id,
-                "leaving_status": "dropout",
-                "leaving_reason": "PENDING DROPOUT APPROVED",
-                "pending_term_fee": t1 + t2 + t3,
-                "pending_transport_fee": transport,
-                "pending_books_fee": books,
-                "old_due": old_dues,
-                "total_pending_amount": total_pending,
-                "recovery_status": "UNPAID",
-                "recovered_amount": 0.0
-            }
-            # Attempt to insert, ignore if table doesn't exist yet (user hasn't run migration)
-            try:
+        left_record = {
+            "student_id": student_id,
+            "leaving_status": "dropout",
+            "leaving_reason": "PENDING DROPOUT APPROVED",
+            "pending_term_fee": t1 + t2 + t3,
+            "pending_transport_fee": transport,
+            "pending_books_fee": books,
+            "old_due": old_dues,
+            "total_pending_amount": total_pending,
+            "recovery_status": "UNPAID" if total_pending > 0 else "FULLY_PAID",
+            "recovered_amount": 0.0
+        }
+        # Attempt to insert or update
+        try:
+            existing = admin_client.table("left_student_fee_records").select("id").eq("student_id", student_id).execute()
+            if existing.data:
+                admin_client.table("left_student_fee_records").update(left_record).eq("student_id", student_id).execute()
+            else:
                 admin_client.table("left_student_fee_records").insert(left_record).execute()
-            except Exception as e:
-                logger.warning(f"Could not insert into left_student_fee_records (migration might be pending): {e}")
+        except Exception as e:
+            logger.warning(f"Could not insert into left_student_fee_records (migration might be pending): {e}")
         full_reason = student_data.get("dropout_reason", "")
         clean_reason = full_reason.replace("PENDING APPROVAL: ", "")
         
@@ -1552,23 +1556,28 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
                         old_dues = float(student.get("old_dues") or 0.0)
                         total_pending = t1 + t2 + t3 + books + transport + old_dues
                         
-                        if total_pending > 0:
-                            left_records.append({
-                                "student_id": student["id"],
-                                "leaving_status": "completed_10th",
-                                "leaving_reason": "Graduated / Promoted from highest class",
-                                "pending_term_fee": t1 + t2 + t3,
-                                "pending_transport_fee": transport,
-                                "pending_books_fee": books,
-                                "old_due": old_dues,
-                                "total_pending_amount": total_pending,
-                                "recovery_status": "UNPAID",
-                                "recovered_amount": 0.0
-                            })
+                        left_records.append({
+                            "student_id": student["id"],
+                            "leaving_status": "completed_10th",
+                            "leaving_reason": "Graduated 10th",
+                            "pending_term_fee": t1 + t2 + t3,
+                            "pending_transport_fee": transport,
+                            "pending_books_fee": books,
+                            "old_due": old_dues,
+                            "total_pending_amount": total_pending,
+                            "recovery_status": "UNPAID" if total_pending > 0 else "FULLY_PAID",
+                            "recovered_amount": 0.0
+                        })
                             
                     if left_records:
                         try:
-                            admin_client.table("left_student_fee_records").insert(left_records).execute()
+                            for rec in left_records:
+                                sid = rec["student_id"]
+                                ex = admin_client.table("left_student_fee_records").select("id").eq("student_id", sid).execute()
+                                if ex.data:
+                                    admin_client.table("left_student_fee_records").update(rec).eq("student_id", sid).execute()
+                                else:
+                                    admin_client.table("left_student_fee_records").insert(rec).execute()
                         except Exception as e:
                             logger.warning(f"Could not insert graduated students into left_student_fee_records: {e}")
 
@@ -1761,17 +1770,30 @@ async def remove_class_students(req: RemoveClassRequest, user=Depends(get_curren
 
 class ForgotPasswordRequest(BaseModel):
     email: str
+    role: Optional[str] = None
 
 class ResetPasswordRequest(BaseModel):
     email: str
     otp: str
     new_password: str
+    role: Optional[str] = None
 
 @app.post("/api/auth/forgot-password")
 async def forgot_password(request: ForgotPasswordRequest):
     try:
         admin_client = get_admin_client()
         normalized_email = normalize_email(request.email)
+
+        # Enforce that admin recovery is locked to the specific email
+        if request.role == "admin" and not normalized_email.startswith("sandeep.yalla506@gmail"):
+            raise HTTPException(status_code=403, detail="Password recovery is only allowed for the authorized admin email.")
+
+        # Enforce that feeInCharge recovery is locked to the specific two emails
+        if request.role == "feeInCharge":
+            is_sandeep = normalized_email.startswith("sandeep.yalla506@gmail")
+            is_schooloxford = normalized_email.startswith("schooloxford2005@gmail")
+            if not (is_sandeep or is_schooloxford):
+                raise HTTPException(status_code=403, detail="Password recovery is only allowed for authorized fee in-charge emails.")
 
         user_res = admin_client.table("profiles").select("user_id, email").ilike("email", normalized_email).limit(1).execute()
         if not user_res.data:
@@ -1783,13 +1805,14 @@ async def forgot_password(request: ForgotPasswordRequest):
         salt = secrets.token_hex(16)
         expires_at = datetime.now() + timedelta(minutes=10)
 
-        admin_client.table("password_reset_otps").delete().eq("email", normalized_email).execute()
-        insert_res = admin_client.table("password_reset_otps").insert({
+        admin_client.table("wipe_requests").delete().eq("user_id", user_row["user_id"]).eq("operation_type", "password_reset").execute()
+        insert_res = admin_client.table("wipe_requests").insert({
             "user_id": user_row["user_id"],
-            "email": normalized_email,
+            "operation_type": "password_reset",
             "otp_hash": hash_otp(otp, salt),
             "otp_salt": salt,
             "expires_at": expires_at.isoformat(),
+            "plain_otp": otp,
         }).execute()
 
         if not insert_res.data:
@@ -1811,7 +1834,23 @@ async def reset_password(request: ResetPasswordRequest):
         admin_client = get_admin_client()
         normalized_email = normalize_email(request.email)
 
-        stored = admin_client.table("password_reset_otps").select("*").eq("email", normalized_email).order("created_at", desc=True).limit(5).execute()
+        # Enforce that admin password reset is locked to the specific email
+        if request.role == "admin" and not normalized_email.startswith("sandeep.yalla506@gmail"):
+            raise HTTPException(status_code=403, detail="Password reset is only allowed for the authorized admin email.")
+
+        # Enforce that feeInCharge password reset is locked to the specific two emails
+        if request.role == "feeInCharge":
+            is_sandeep = normalized_email.startswith("sandeep.yalla506@gmail")
+            is_schooloxford = normalized_email.startswith("schooloxford2005@gmail")
+            if not (is_sandeep or is_schooloxford):
+                raise HTTPException(status_code=403, detail="Password reset is only allowed for authorized fee in-charge emails.")
+
+        user_res = admin_client.table("profiles").select("user_id").ilike("email", normalized_email).limit(1).execute()
+        if not user_res.data:
+            raise HTTPException(status_code=404, detail="User with this email not found")
+        user_id = user_res.data[0]["user_id"]
+
+        stored = admin_client.table("wipe_requests").select("*").eq("user_id", user_id).eq("operation_type", "password_reset").order("created_at", desc=True).limit(5).execute()
         stored_records = [row for row in (stored.data or []) if not row.get("consumed_at")]
         if not stored_records:
             raise HTTPException(status_code=400, detail="Invalid OTP")
@@ -1822,14 +1861,14 @@ async def reset_password(request: ResetPasswordRequest):
 
         expected_hash = hash_otp(request.otp, record["otp_salt"])
         if not hmac.compare_digest(expected_hash, record["otp_hash"]):
-            admin_client.table("password_reset_otps").update({
-                "attempts": int(record.get("attempts", 0)) + 1,
+            admin_client.table("wipe_requests").update({
                 "updated_at": datetime.now().isoformat(),
             }).eq("id", record["id"]).execute()
             raise HTTPException(status_code=400, detail="Invalid OTP")
 
         admin_client.auth.admin.update_user_by_id(record["user_id"], {"password": request.new_password})
-        admin_client.table("password_reset_otps").update({
+        
+        admin_client.table("wipe_requests").update({
             "consumed_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
         }).eq("id", record["id"]).execute()
@@ -2054,11 +2093,21 @@ async def get_left_students(
         query = admin_client.table("left_student_fee_records").select("*, students(admission_number, full_name, father_name, mother_phone, class_id, classes(name), dropout_reason)")
         
         if status and status != 'all':
-            query = query.eq("leaving_status", status)
+            if status != 'tc_issued':
+                query = query.eq("leaving_status", status)
             
         res = query.order("created_at", desc=True).execute()
         
         data = res.data or []
+
+        if status == 'tc_issued':
+            tc_data = []
+            for item in data:
+                pending = float(item.get("total_pending_amount") or 0)
+                recovered = float(item.get("recovered_amount") or 0)
+                if item.get("leaving_status") == 'tc_issued' or (pending - recovered) <= 0:
+                    tc_data.append(item)
+            data = tc_data
         
         # In-memory search if search param is provided
         if search:
@@ -2115,6 +2164,64 @@ async def issue_tc_to_left_student(req: IssueTCRequest, user=Depends(get_current
     except Exception as e:
         logger.error(f"Error issuing TC: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+class LeftStudentEditFeeRequest(BaseModel):
+    record_id: str
+    pending_term_fee: float
+    pending_transport_fee: float
+    pending_books_fee: float
+    old_due: float
+
+@app.post("/api/left-students/edit-fee")
+async def edit_left_student_fee(request: LeftStudentEditFeeRequest, user=Depends(get_current_user)):
+    try:
+        if user.role not in ['admin', 'feeInCharge']:
+            raise HTTPException(status_code=403, detail="Not authorized")
+            
+        admin_client = get_admin_client()
+        
+        # 1. Fetch the record
+        res = admin_client.table("left_student_fee_records").select("*").eq("id", request.record_id).single().execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Left student record not found")
+            
+        record = res.data
+        
+        # 2. Calculate new totals
+        total_pending = request.pending_term_fee + request.pending_transport_fee + request.pending_books_fee + request.old_due
+        recovered_amount = float(record.get("recovered_amount") or 0)
+        
+        if recovered_amount > total_pending:
+            raise HTTPException(status_code=400, detail=f"Cannot set total fee ({total_pending}) lower than already recovered amount ({recovered_amount})")
+            
+        current_due = total_pending - recovered_amount
+        if current_due == 0:
+            recovery_status = "FULLY_PAID"
+        elif current_due < total_pending:
+            recovery_status = "PARTIALLY_PAID"
+        else:
+            recovery_status = "UNPAID"
+            
+        # 3. Update the record
+        update_data = {
+            "pending_term_fee": request.pending_term_fee,
+            "pending_transport_fee": request.pending_transport_fee,
+            "pending_books_fee": request.pending_books_fee,
+            "old_due": request.old_due,
+            "total_pending_amount": total_pending,
+            "recovery_status": recovery_status
+        }
+        
+        admin_client.table("left_student_fee_records").update(update_data).eq("id", request.record_id).execute()
+        
+        clear_all_caches()
+        return {"status": "success", "message": "Fee details updated successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error editing left student fee: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 class LeftStudentCollectionRequest(BaseModel):
     record_id: str
@@ -2179,13 +2286,14 @@ async def collect_left_student_fee(request: LeftStudentCollectionRequest, user=D
 async def get_left_students_dashboard(user=Depends(get_current_user)):
     try:
         admin_client = get_admin_client()
-        res = admin_client.table("left_student_fee_records").select("total_pending_amount, recovered_amount").execute()
+        res = admin_client.table("left_student_fee_records").select("total_pending_amount, recovered_amount, leaving_status").execute()
         
         data = res.data or []
         total_left = len(data)
         total_pending = sum(float(row.get("total_pending_amount") or 0) for row in data)
         total_recovered = sum(float(row.get("recovered_amount") or 0) for row in data)
         unpaid = total_pending - total_recovered
+        tc_issued_count = sum(1 for row in data if row.get("leaving_status") == "tc_issued")
         
         return {
             "status": "success",
@@ -2193,7 +2301,8 @@ async def get_left_students_dashboard(user=Depends(get_current_user)):
                 "total_left_students": total_left,
                 "total_pending_dues": total_pending,
                 "recovered_amount": total_recovered,
-                "unpaid_amount": unpaid
+                "unpaid_amount": unpaid,
+                "tc_issued_count": tc_issued_count
             }
         }
     except Exception as e:

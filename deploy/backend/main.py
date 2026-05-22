@@ -376,17 +376,30 @@ def get_notices():
 
 class ForgotPasswordRequest(BaseModel):
     email: str
+    role: Optional[str] = None
 
 class ResetPasswordRequest(BaseModel):
     email: str
     otp: str
     new_password: str
+    role: Optional[str] = None
 
 @app.post("/api/auth/forgot-password")
 async def forgot_password(request: ForgotPasswordRequest):
     try:
         admin_client = get_admin_client()
         normalized_email = normalize_email(request.email)
+
+        # Enforce that admin recovery is locked to the specific email
+        if request.role == "admin" and not normalized_email.startswith("sandeep.yalla506@gmail"):
+            raise HTTPException(status_code=403, detail="Password recovery is only allowed for the authorized admin email.")
+
+        # Enforce that feeInCharge recovery is locked to the specific two emails
+        if request.role == "feeInCharge":
+            is_sandeep = normalized_email.startswith("sandeep.yalla506@gmail")
+            is_schooloxford = normalized_email.startswith("schooloxford2005@gmail")
+            if not (is_sandeep or is_schooloxford):
+                raise HTTPException(status_code=403, detail="Password recovery is only allowed for authorized fee in-charge emails.")
 
         user_res = admin_client.table("profiles").select("user_id, email").ilike("email", normalized_email).limit(1).execute()
         if not user_res.data:
@@ -398,13 +411,14 @@ async def forgot_password(request: ForgotPasswordRequest):
         salt = secrets.token_hex(16)
         expires_at = datetime.now() + timedelta(minutes=10)
 
-        admin_client.table("password_reset_otps").delete().eq("email", normalized_email).execute()
-        insert_res = admin_client.table("password_reset_otps").insert({
+        admin_client.table("wipe_requests").delete().eq("user_id", user_row["user_id"]).eq("operation_type", "password_reset").execute()
+        insert_res = admin_client.table("wipe_requests").insert({
             "user_id": user_row["user_id"],
-            "email": normalized_email,
+            "operation_type": "password_reset",
             "otp_hash": hash_otp(otp, salt),
             "otp_salt": salt,
             "expires_at": expires_at.isoformat(),
+            "plain_otp": otp,
         }).execute()
 
         if not insert_res.data:
@@ -426,7 +440,23 @@ async def reset_password(request: ResetPasswordRequest):
         admin_client = get_admin_client()
         normalized_email = normalize_email(request.email)
 
-        stored = admin_client.table("password_reset_otps").select("*").eq("email", normalized_email).order("created_at", desc=True).limit(5).execute()
+        # Enforce that admin password reset is locked to the specific email
+        if request.role == "admin" and not normalized_email.startswith("sandeep.yalla506@gmail"):
+            raise HTTPException(status_code=403, detail="Password reset is only allowed for the authorized admin email.")
+
+        # Enforce that feeInCharge password reset is locked to the specific two emails
+        if request.role == "feeInCharge":
+            is_sandeep = normalized_email.startswith("sandeep.yalla506@gmail")
+            is_schooloxford = normalized_email.startswith("schooloxford2005@gmail")
+            if not (is_sandeep or is_schooloxford):
+                raise HTTPException(status_code=403, detail="Password reset is only allowed for authorized fee in-charge emails.")
+
+        user_res = admin_client.table("profiles").select("user_id").ilike("email", normalized_email).limit(1).execute()
+        if not user_res.data:
+            raise HTTPException(status_code=404, detail="User with this email not found")
+        user_id = user_res.data[0]["user_id"]
+
+        stored = admin_client.table("wipe_requests").select("*").eq("user_id", user_id).eq("operation_type", "password_reset").order("created_at", desc=True).limit(5).execute()
         stored_records = [row for row in (stored.data or []) if not row.get("consumed_at")]
         if not stored_records:
             raise HTTPException(status_code=400, detail="Invalid OTP")
@@ -437,14 +467,13 @@ async def reset_password(request: ResetPasswordRequest):
 
         expected_hash = hash_otp(request.otp, record["otp_salt"])
         if not hmac.compare_digest(expected_hash, record["otp_hash"]):
-            admin_client.table("password_reset_otps").update({
-                "attempts": int(record.get("attempts", 0)) + 1,
+            admin_client.table("wipe_requests").update({
                 "updated_at": datetime.now().isoformat(),
             }).eq("id", record["id"]).execute()
             raise HTTPException(status_code=400, detail="Invalid OTP")
 
         admin_client.auth.admin.update_user_by_id(record["user_id"], {"password": request.new_password})
-        admin_client.table("password_reset_otps").update({
+        admin_client.table("wipe_requests").update({
             "consumed_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
         }).eq("id", record["id"]).execute()
