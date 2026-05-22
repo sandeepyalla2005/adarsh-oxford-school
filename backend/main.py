@@ -1784,9 +1784,11 @@ async def forgot_password(request: ForgotPasswordRequest):
         admin_client = get_admin_client()
         normalized_email = normalize_email(request.email)
 
-        # Enforce that admin recovery is locked to the specific email
-        if request.role == "admin" and not normalized_email.startswith("sandeep.yalla506@gmail"):
-            raise HTTPException(status_code=403, detail="Password recovery is only allowed for the authorized admin email.")
+        # Enforce that admin recovery is locked to specific emails
+        is_sandeep_admin = normalized_email.startswith("sandeep.yalla506@gmail")
+        is_main_admin = normalized_email.startswith("admin@adarshoxford.com")
+        if not (is_sandeep_admin or is_main_admin):
+            raise HTTPException(status_code=403, detail="Password recovery is only allowed for authorized admin emails.")
 
         # Enforce that feeInCharge recovery is locked to the specific two emails
         if request.role == "feeInCharge":
@@ -1834,9 +1836,12 @@ async def reset_password(request: ResetPasswordRequest):
         admin_client = get_admin_client()
         normalized_email = normalize_email(request.email)
 
-        # Enforce that admin password reset is locked to the specific email
-        if request.role == "admin" and not normalized_email.startswith("sandeep.yalla506@gmail"):
-            raise HTTPException(status_code=403, detail="Password reset is only allowed for the authorized admin email.")
+        # Enforce that admin password reset is locked to specific emails
+        if request.role == "admin":
+            is_sandeep_admin = normalized_email.startswith("sandeep.yalla506@gmail")
+            is_main_admin = normalized_email.startswith("admin@adarshoxford.com")
+            if not (is_sandeep_admin or is_main_admin):
+                raise HTTPException(status_code=403, detail="Password reset is only allowed for authorized admin emails.")
 
         # Enforce that feeInCharge password reset is locked to the specific two emails
         if request.role == "feeInCharge":

@@ -165,8 +165,9 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
     try {
       const normalizedForgotEmail = forgotEmail.trim().toLowerCase();
       if (portalType === 'admin') {
-        if (!normalizedForgotEmail.startsWith('sandeep.yalla506@gmail')) {
-          throw new Error('Password recovery is only allowed for the authorized admin email.');
+        const isAdminEmail = normalizedForgotEmail.startsWith('sandeep.yalla506@gmail') || normalizedForgotEmail.startsWith('admin@adarshoxford.com');
+        if (!isAdminEmail) {
+          throw new Error('Password recovery is only allowed for authorized admin emails.');
         }
       } else if (portalType === 'fee') {
         if (!normalizedForgotEmail.startsWith('sandeep.yalla506@gmail') && !normalizedForgotEmail.startsWith('schooloxford2005@gmail')) {
@@ -208,8 +209,9 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
     try {
       const normalizedForgotEmail = forgotEmail.trim().toLowerCase();
       if (portalType === 'admin') {
-        if (!normalizedForgotEmail.startsWith('sandeep.yalla506@gmail')) {
-          throw new Error('Password reset is only allowed for the authorized admin email.');
+        const isAdminEmail = normalizedForgotEmail.startsWith('sandeep.yalla506@gmail') || normalizedForgotEmail.startsWith('admin@adarshoxford.com');
+        if (!isAdminEmail) {
+          throw new Error('Password reset is only allowed for authorized admin emails.');
         }
       } else if (portalType === 'fee') {
         if (!normalizedForgotEmail.startsWith('sandeep.yalla506@gmail') && !normalizedForgotEmail.startsWith('schooloxford2005@gmail')) {
