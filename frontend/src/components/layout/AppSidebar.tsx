@@ -21,7 +21,8 @@ import {
   Wallet,
   ChevronDown,
   ChevronRight,
-  IndianRupee
+  IndianRupee,
+  UserMinus
 } from 'lucide-react';
 import { useLocation, Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -58,6 +59,7 @@ const adminNavigation = [
   { name: 'Audit Logs', path: '/audit', icon: History, roles: ['admin'] },
   { name: 'Notices', path: '/notices', icon: MessageSquare, roles: ['admin'] },
   { name: 'Dropouts Dashboard', path: '/approvals', icon: AlertCircle, roles: ['admin'] },
+  { name: 'Left Students', path: '/left-students', icon: UserMinus, roles: ['admin'] },
   { name: 'SMS', path: '/sms', icon: MessageSquare, roles: ['admin'] },
   { name: 'Attendance', path: '/attendance', icon: UserCheck, roles: ['admin'] },
   { name: 'Homework', path: '/homework', icon: ClipboardList, roles: ['admin'] },
@@ -105,6 +107,7 @@ const feeNavigation = [
       { name: 'Pending Fees', path: '/pending-fees', icon: AlertCircle },
     ]
   },
+  { name: 'Left Students', path: '/left-students', icon: UserMinus, roles: ['admin', 'feeInCharge'] },
   { name: 'Notices', path: '/notices', icon: MessageSquare, roles: ['admin', 'feeInCharge'] },
   { name: 'Attendance', path: '/attendance', icon: UserCheck, roles: ['admin', 'feeInCharge'] },
   { name: 'Homework', path: '/homework', icon: ClipboardList, roles: ['admin', 'feeInCharge'] },

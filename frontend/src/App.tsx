@@ -34,6 +34,7 @@ const lazyWithRetry = (componentImport: () => Promise<any>) =>
 
 const Dashboard = lazyWithRetry(() => import("./pages/Dashboard"));
 const Students = lazyWithRetry(() => import("./pages/Students"));
+const LeftStudents = lazyWithRetry(() => import("./pages/LeftStudents"));
 const ClassStudents = lazyWithRetry(() => import("./pages/ClassStudents"));
 const CourseFees = lazyWithRetry(() => import("./pages/CourseFees"));
 const BooksFees = lazyWithRetry(() => import("./pages/BooksFees"));
@@ -127,6 +128,7 @@ type PortalRouteDef = {
 const portalRoutes: PortalRouteDef[] = [
   { path: "/dashboard", element: <Dashboard />, portals: ["admin", "staff", "fee"] },
   { path: "/students", element: <Students />, portals: ["admin", "staff", "fee"] },
+  { path: "/left-students", element: <LeftStudents />, portals: ["admin", "fee"] },
   { path: "/students/:className", element: <ClassStudents />, portals: ["admin", "staff", "fee"] },
   { path: "/course-fees", element: <CourseFees />, portals: ["admin", "fee"] },
   { path: "/books-fees", element: <BooksFees />, portals: ["admin", "fee"] },

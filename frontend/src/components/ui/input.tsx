@@ -12,6 +12,17 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
           className,
         )}
         ref={ref}
+        onWheel={(e) => {
+          if (type === "number") {
+            // Prevent the wheel from changing the value
+            (e.target as HTMLInputElement).blur();
+            // Optional: immediately refocus if we want to keep typing, but blur is safer to stop scroll
+          }
+          if (props.onWheel) {
+            props.onWheel(e);
+          }
+        }}
+        min={type === "number" ? "0" : undefined}
         {...props}
       />
     );

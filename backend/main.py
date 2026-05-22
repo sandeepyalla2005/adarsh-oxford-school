@@ -425,20 +425,26 @@ def get_classes():
         raise HTTPException(status_code=500, detail=str(e))
 
 def purge_deleted_students():
-    """Permanently deletes students marked for deletion older than 15 days."""
     try:
         from datetime import datetime, timedelta, timezone
         fifteen_days_ago = (datetime.now(timezone.utc) - timedelta(days=15)).isoformat()
         
-        # Purge records marked with DELETED_PENDING_PURGE and older than 15 days
-        res = supabase.table("students") \
-            .delete() \
-            .eq("dropout_reason", "DELETED_PENDING_PURGE") \
-            .lt("updated_at", fifteen_days_ago) \
-            .execute()
+        # We need to fetch the IDs of students to be deleted to also delete dependent records
+        students_to_delete = supabase.table("students").select("id").eq("dropout_reason", "DELETED_PENDING_PURGE").lt("updated_at", fifteen_days_ago).execute()
+        
+        if students_to_delete.data:
+            student_ids = [s["id"] for s in students_to_delete.data]
+            dependent_tables = ["attendance_records", "course_payments", "books_payments", "transport_payments", "student_accessory_payments"]
             
-        if res.data:
-            logger.info(f"Purged {len(res.data)} students from retention queue.")
+            for table in dependent_tables:
+                # Delete dependent records first to avoid foreign key constraint errors
+                supabase.table(table).delete().in_("student_id", student_ids).execute()
+                
+            # Now delete the students
+            res = supabase.table("students").delete().in_("id", student_ids).execute()
+            
+            if res.data:
+                logger.info(f"Purged {len(res.data)} students from retention queue.")
     except Exception as e:
         logger.error(f"Error purging deleted students: {e}")
 
@@ -1095,10 +1101,24 @@ async def mark_student_dropout(student_id: str, request: DropoutConfirmRequest, 
         total_pending = t1 + t2 + t3 + books + transport + old_dues
         
         if total_pending > 0:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Cannot dropout student with pending fees (₹{total_pending:,.2f}). Please clear or waive outstanding dues first!"
-            )
+            # Create a left_student_fee_records entry
+            left_record = {
+                "student_id": student_id,
+                "leaving_status": "dropout",
+                "leaving_reason": request.reason,
+                "pending_term_fee": t1 + t2 + t3,
+                "pending_transport_fee": transport,
+                "pending_books_fee": books,
+                "old_due": old_dues,
+                "total_pending_amount": total_pending,
+                "recovery_status": "UNPAID",
+                "recovered_amount": 0.0
+            }
+            # Attempt to insert, ignore if table doesn't exist yet (user hasn't run migration)
+            try:
+                admin_client.table("left_student_fee_records").insert(left_record).execute()
+            except Exception as e:
+                logger.warning(f"Could not insert into left_student_fee_records (migration might be pending): {e}")
             
         res = admin_client.table("students").update({
             "status": "dropout",
@@ -1182,7 +1202,13 @@ async def request_dropout(request: DropoutRequest, user=Depends(get_current_user
         total_pending = t1 + t2 + t3 + books + transport + old_dues
 
         if total_pending > 0:
-            raise HTTPException(status_code=400, detail=f"Cannot dropout student with pending fees (₹{total_pending:,.2f}). Please clear or waive outstanding dues first!")
+            # Create a left_student_fee_records entry but mark it as pending dropout?
+            # Actually request_dropout is just changing status to 'dropout_pending'.
+            # We will insert into left_student_fee_records once it is APPROVED.
+            # But wait, if they have pending fees, it was blocked before.
+            # Now we just allow it to go to 'dropout_pending'. The actual left_student_fee_records insert will happen when Admin approves it.
+            # So we just remove the block.
+            pass
 
         # 3. Update status to 'dropout_pending'
         res = admin_client.table("students").update({
@@ -1375,8 +1401,24 @@ async def approve_dropout(student_id: str, user=Depends(get_current_user)):
         total_pending = t1 + t2 + t3 + books + transport + old_dues
 
         if total_pending > 0:
-            raise HTTPException(status_code=400, detail=f"Cannot approve dropout for student with pending fees (₹{total_pending:,.2f}). Please clear or waive outstanding dues first!")
-
+            # Create a left_student_fee_records entry
+            left_record = {
+                "student_id": student_id,
+                "leaving_status": "dropout",
+                "leaving_reason": "PENDING DROPOUT APPROVED",
+                "pending_term_fee": t1 + t2 + t3,
+                "pending_transport_fee": transport,
+                "pending_books_fee": books,
+                "old_due": old_dues,
+                "total_pending_amount": total_pending,
+                "recovery_status": "UNPAID",
+                "recovered_amount": 0.0
+            }
+            # Attempt to insert, ignore if table doesn't exist yet (user hasn't run migration)
+            try:
+                admin_client.table("left_student_fee_records").insert(left_record).execute()
+            except Exception as e:
+                logger.warning(f"Could not insert into left_student_fee_records (migration might be pending): {e}")
         full_reason = student_data.get("dropout_reason", "")
         clean_reason = full_reason.replace("PENDING APPROVAL: ", "")
         
@@ -1483,18 +1525,65 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
         promoted = 0
         skipped = 0
         
+        # Look up fee structures for the current academic year
+        current_year = get_current_academic_year()
+        fee_res = admin_client.table("fee_structure").select("*").eq("academic_year", current_year).execute()
+        fee_structures = {row["class_id"]: row for row in (fee_res.data or [])}
+
         # Loop in reverse order (highest sort_order to lowest sort_order)
         # to prevent unique constraint (class_id, admission_number) violations
         # during promotion of students into currently occupied target classes.
         for i in range(len(classes) - 1, -1, -1):
             current = classes[i]
             if i + 1 >= len(classes):
-                # Highest class, count as skipped
-                count_res = admin_client.table("students").select("id", count="exact").eq("class_id", current["id"]).eq("is_active", True).execute()
-                skipped += count_res.count or 0
+                # Highest class, mark as dropout instead of skipping
+                # And ensure we move their pending fees to left_student_fee_records
+                students_res = admin_client.table("students").select("*").eq("class_id", current["id"]).eq("is_active", True).execute()
+                if students_res.data:
+                    count = len(students_res.data)
+                    left_records = []
+                    
+                    for student in students_res.data:
+                        t1 = float(student.get("term1_fee") or 0.0)
+                        t2 = float(student.get("term2_fee") or 0.0)
+                        t3 = float(student.get("term3_fee") or 0.0)
+                        books = float(student.get("books_fee") or 0.0) if student.get("has_books") else 0.0
+                        transport = float(student.get("transport_fee") or 0.0) if student.get("has_transport") else 0.0
+                        old_dues = float(student.get("old_dues") or 0.0)
+                        total_pending = t1 + t2 + t3 + books + transport + old_dues
+                        
+                        if total_pending > 0:
+                            left_records.append({
+                                "student_id": student["id"],
+                                "leaving_status": "completed_10th",
+                                "leaving_reason": "Graduated / Promoted from highest class",
+                                "pending_term_fee": t1 + t2 + t3,
+                                "pending_transport_fee": transport,
+                                "pending_books_fee": books,
+                                "old_due": old_dues,
+                                "total_pending_amount": total_pending,
+                                "recovery_status": "UNPAID",
+                                "recovered_amount": 0.0
+                            })
+                            
+                    if left_records:
+                        try:
+                            admin_client.table("left_student_fee_records").insert(left_records).execute()
+                        except Exception as e:
+                            logger.warning(f"Could not insert graduated students into left_student_fee_records: {e}")
+
+                    admin_client.table("students").update({
+                        "status": "completed_10th",
+                        "is_active": False,
+                        "dropout_reason": "Graduated / Promoted from highest class",
+                        "dropout_date": datetime.now().isoformat(),
+                        "updated_at": datetime.now().isoformat()
+                    }).eq("class_id", current["id"]).eq("is_active", True).execute()
+                    skipped += count
                 continue
                 
             next_class = classes[i + 1]
+            next_fee_struct = fee_structures.get(next_class["id"], {})
             
             # Fetch existing admission numbers in next_class to proactively prevent duplicates
             existing_res = admin_client.table("students").select("admission_number").eq("class_id", next_class["id"]).execute()
@@ -1531,9 +1620,9 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
                     student["class_id"] = next_class["id"]
                     student["admission_number"] = new_adm
                     student["old_dues"] = new_old_dues
-                    student["term1_fee"] = 0.0
-                    student["term2_fee"] = 0.0
-                    student["term3_fee"] = 0.0
+                    student["term1_fee"] = float(next_fee_struct.get("term1_fee") or 0.0)
+                    student["term2_fee"] = float(next_fee_struct.get("term2_fee") or 0.0)
+                    student["term3_fee"] = float(next_fee_struct.get("term3_fee") or 0.0)
                     student["books_fee"] = 0.0
                     student["has_books"] = False
                     student["transport_fee"] = 0.0
@@ -1552,7 +1641,7 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
         clear_all_caches()
         return {
             "status": "success",
-            "message": f"Promoted {promoted} students. Skipped {skipped} students in the highest class.",
+            "message": f"Promoted {promoted} students. Graduated {skipped} students from the highest class.",
             "promoted": promoted,
             "skipped": skipped
         }
@@ -1820,15 +1909,26 @@ async def request_wipe(request: Optional[dict] = None, user=Depends(get_current_
         
         logger.info(f"Wipe OTP generated for user {user.id} ({op_type})")
         
-        # Try to send email
-        notify_email = os.environ.get("WIPE_NOTIFICATION_EMAIL", "").strip()
+        # Fetch user's registered email from profiles
+        notify_email = None
+        user_res = admin_client.table("profiles").select("email").eq("user_id", user.id).limit(1).execute()
+        if user_res.data and user_res.data[0].get("email"):
+            notify_email = user_res.data[0]["email"]
+        elif hasattr(user, "email") and user.email:
+            notify_email = user.email
+            
+        if not notify_email:
+            notify_email = os.environ.get("WIPE_NOTIFICATION_EMAIL", "").strip()
+            
         if not notify_email:
             admin_res = admin_client.table("profiles").select("email").eq("designation", "Super Admin").limit(1).execute()
-            if admin_res.data:
+            if admin_res.data and admin_res.data[0].get("email"):
                 notify_email = admin_res.data[0]["email"]
         
         if notify_email:
-            send_reset_otp(notify_email, f"Security Alert: A wipe request for '{op_type}' has been initiated.\n\nOTP Code: {otp}\n\nRequested by user: {user.id}\nExpires in 10 minutes.")
+            subject = f"Wipe Request OTP ({op_type})"
+            body = f"Security Alert: A wipe request for '{op_type}' has been initiated.\n\nOTP Code: {otp}\n\nRequested by user: {user.id}\nExpires in 10 minutes."
+            send_email(notify_email, subject, body)
             logger.info(f"Wipe OTP email sent to: {notify_email}")
         else:
             logger.warning("No administrator email found for wipe notification. OTP generated but not emailed.")
@@ -1906,7 +2006,12 @@ async def handle_wipe_operation(op_type: str, request: dict, user):
             
         # Proceed with wipe
         if op_type == "students":
-            # Bulk delete students (except a dummy if needed, but here we delete all)
+            # 1. Delete dependent records first to prevent foreign key constraint violations
+            dependent_tables = ["attendance_records", "course_payments", "books_payments", "transport_payments", "student_accessory_payments"]
+            for table in dependent_tables:
+                admin_client.table(table).delete().neq("student_id", "00000000-0000-0000-0000-000000000000").execute()
+                
+            # 2. Bulk delete students (except a dummy if needed, but here we delete all)
             # We use admin_client to bypass RLS if necessary, though delete().neq() is standard
             wipe_res = admin_client.table("students").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
             count = len(wipe_res.data) if wipe_res.data else 0
@@ -1931,6 +2036,168 @@ async def handle_wipe_operation(op_type: str, request: dict, user):
         raise
     except Exception as e:
         logger.error(f"Error in {op_type} wipe: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- LEFT STUDENTS MODULE ENDPOINTS ---
+
+@app.get("/api/left-students")
+async def get_left_students(
+    search: Optional[str] = None,
+    status: Optional[str] = None,
+    user=Depends(get_current_user)
+):
+    try:
+        if user.role not in ['admin', 'feeInCharge']:
+            raise HTTPException(status_code=403, detail="Not authorized")
+            
+        admin_client = get_admin_client()
+        query = admin_client.table("left_student_fee_records").select("*, students(admission_number, full_name, father_name, mother_phone, class_id, classes(name), dropout_reason)")
+        
+        if status and status != 'all':
+            query = query.eq("leaving_status", status)
+            
+        res = query.order("created_at", desc=True).execute()
+        
+        data = res.data or []
+        
+        # In-memory search if search param is provided
+        if search:
+            search_lower = search.lower()
+            filtered_data = []
+            for item in data:
+                student = item.get("students") or {}
+                if (search_lower in (student.get("admission_number") or "").lower() or 
+                    search_lower in (student.get("full_name") or "").lower() or
+                    search_lower in (student.get("father_name") or "").lower()):
+                    filtered_data.append(item)
+            data = filtered_data
+            
+        return {"status": "success", "data": data}
+    except Exception as e:
+        logger.error(f"Error fetching left students: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class IssueTCRequest(BaseModel):
+    record_id: str
+
+@app.post("/api/left-students/issue-tc")
+async def issue_tc_to_left_student(req: IssueTCRequest, user=Depends(get_current_user)):
+    try:
+        if user.role not in ['admin', 'feeInCharge']:
+            raise HTTPException(status_code=403, detail="Not authorized")
+            
+        admin_client = get_admin_client()
+        
+        record_res = admin_client.table("left_student_fee_records").select("*").eq("id", req.record_id).single().execute()
+        if not record_res.data:
+            raise HTTPException(status_code=404, detail="Record not found")
+            
+        record = record_res.data
+        student_id = record["student_id"]
+        
+        # Update left_student_fee_records
+        admin_client.table("left_student_fee_records").update({
+            "leaving_status": "tc_issued",
+            "updated_at": datetime.now().isoformat()
+        }).eq("id", req.record_id).execute()
+        
+        # Update students table
+        admin_client.table("students").update({
+            "status": "tc_issued",
+            "updated_at": datetime.now().isoformat()
+        }).eq("id", student_id).execute()
+        
+        clear_all_caches()
+        return {"status": "success", "message": "T.C Issued successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error issuing TC: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class LeftStudentCollectionRequest(BaseModel):
+    record_id: str
+    amount: float
+    method: str
+    remarks: Optional[str] = ""
+
+@app.post("/api/left-students/collect")
+async def collect_left_student_fee(request: LeftStudentCollectionRequest, user=Depends(get_current_user)):
+    try:
+        if user.role not in ['admin', 'feeInCharge']:
+            raise HTTPException(status_code=403, detail="Not authorized")
+            
+        admin_client = get_admin_client()
+        
+        # 1. Fetch the record
+        res = admin_client.table("left_student_fee_records").select("*").eq("id", request.record_id).single().execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Left student record not found")
+            
+        record = res.data
+        
+        if request.amount <= 0:
+            raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+            
+        # 2. Insert recovery payment
+        receipt_no = f"REC-LS-{os.urandom(3).hex().upper()}"
+        payment_data = {
+            "left_record_id": request.record_id,
+            "amount_paid": request.amount,
+            "payment_method": request.method,
+            "receipt_number": receipt_no,
+            "remarks": request.remarks,
+            "collected_by": user.id
+        }
+        
+        admin_client.table("left_student_recovery_payments").insert(payment_data).execute()
+        
+        # 3. Update recovered amount and status
+        new_recovered = float(record.get("recovered_amount") or 0.0) + request.amount
+        total_pending = float(record.get("total_pending_amount") or 0.0)
+        
+        if new_recovered >= total_pending:
+            new_status = "FULLY_PAID"
+        else:
+            new_status = "PARTIALLY_PAID"
+            
+        admin_client.table("left_student_fee_records").update({
+            "recovered_amount": new_recovered,
+            "recovery_status": new_status,
+            "updated_at": datetime.now().isoformat()
+        }).eq("id", request.record_id).execute()
+        
+        return {"status": "success", "receipt_number": receipt_no}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error collecting left student fee: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/left-students/dashboard")
+async def get_left_students_dashboard(user=Depends(get_current_user)):
+    try:
+        admin_client = get_admin_client()
+        res = admin_client.table("left_student_fee_records").select("total_pending_amount, recovered_amount").execute()
+        
+        data = res.data or []
+        total_left = len(data)
+        total_pending = sum(float(row.get("total_pending_amount") or 0) for row in data)
+        total_recovered = sum(float(row.get("recovered_amount") or 0) for row in data)
+        unpaid = total_pending - total_recovered
+        
+        return {
+            "status": "success",
+            "data": {
+                "total_left_students": total_left,
+                "total_pending_dues": total_pending,
+                "recovered_amount": total_recovered,
+                "unpaid_amount": unpaid
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error fetching left students dashboard: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
