@@ -67,9 +67,7 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showForgotModal, setShowForgotModal] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState(
-    (portalType === 'admin' || portalType === 'fee') ? 'sandeep.yalla506@gmail.com' : ''
-  );
+  const [forgotEmail, setForgotEmail] = useState('');
   const [forgotStep, setForgotStep] = useState<'request' | 'reset'>('request');
   const [otp, setOtp] = useState('');
   const [newPass, setNewPass] = useState('');
@@ -77,10 +75,17 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
   const { signIn, signInWithGoogle, user, userRole } = useAuth();
 
   useEffect(() => {
-    if (showForgotModal && (portalType === 'admin' || portalType === 'fee') && !forgotEmail) {
-      setForgotEmail('sandeep.yalla506@gmail.com');
+    if (showForgotModal) {
+      const cleanUsername = username.trim().toLowerCase();
+      if (cleanUsername && (cleanUsername.includes('@') || cleanUsername.includes('.'))) {
+        setForgotEmail(cleanUsername);
+      } else if (portalType === 'admin') {
+        setForgotEmail('admin@adarshoxford.com');
+      } else if (portalType === 'fee') {
+        setForgotEmail('schooloxford2005@gmail.com');
+      }
     }
-  }, [showForgotModal, portalType]);
+  }, [showForgotModal, username, portalType]);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -466,12 +471,11 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
                   value={forgotEmail}
                   onChange={(e) => setForgotEmail(e.target.value)}
                   className="rounded-xl bg-slate-50 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
-                  disabled={portalType === 'admin'}
                   required
                 />
                 {portalType === 'admin' && (
                   <p className="text-xs text-slate-500 font-medium">
-                    Password recovery OTP will only be sent to the authorized admin email.
+                    Password recovery OTP will only be sent to authorized admin emails (admin@adarshoxford.com or sandeep.yalla506@gmail.com).
                   </p>
                 )}
                 {portalType === 'fee' && (
