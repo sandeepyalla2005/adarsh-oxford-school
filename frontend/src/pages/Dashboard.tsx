@@ -167,6 +167,10 @@ export default function Dashboard() {
         if (data.monthlyChartData) {
           setMonthlyData(data.monthlyChartData);
         }
+
+        if (data.categoryBreakdowns) {
+          setCategoryBreakdowns(data.categoryBreakdowns);
+        }
         
         setLastUpdated(new Date(data.lastUpdated));
         setShowStudentBreakdown(false);

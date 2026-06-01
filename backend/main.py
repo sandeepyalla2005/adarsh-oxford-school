@@ -677,188 +677,256 @@ def refresh_dashboard_stats_task():
         # Use admin client to bypass RLS for system-wide dashboard stats
         client = admin_supabase if admin_supabase is not None else supabase
         
-        def count_students(filters: dict[str, str] | None = None) -> int:
-            try:
-                query = client.table("students").select("id", count="exact", head=True).eq("is_active", True)
-                if filters:
-                    for key, value in filters.items():
-                        query = query.eq(key, value)
-                response = query.execute()
-                return int(response.count or 0)
-            except Exception as e:
-                logger.error(f"Error in count_students: {e}")
-                return 0
+        # 1. Count students
+        total_count = 0
+        new_count = 0
+        try:
+            res_total = client.table("students").select("id", count="exact", head=True).eq("is_active", True).execute()
+            total_count = int(res_total.count or 0)
+            res_new = client.table("students").select("id", count="exact", head=True).eq("is_active", True).eq("student_type", "new").execute()
+            new_count = int(res_new.count or 0)
+        except Exception as e:
+            logger.error(f"Error counting students: {e}")
 
-        def _start_of_today_utc() -> datetime:
-            """Returns the start of today in UTC (midnight)."""
-            now = datetime.now(timezone.utc)
-            return now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-        def _since_date(days: int | None) -> datetime | None:
-            """Convert a days-ago value to a UTC datetime floor.
-            days=0  → start of today (midnight UTC)
-            days=7  → 7 days ago at midnight UTC
-            days=30 → 30 days ago at midnight UTC
-            None    → no date filter (all-time)
-            """
-            if days is None:
-                return None
-            today_start = _start_of_today_utc()
-            return today_start - timedelta(days=days)
-
-        def fetch_table_income(table: str, since: datetime | None) -> float:
-            """Fetch total income from one payment table, optionally from a date."""
-            try:
-                amount_col = "total_amount" if table == "accessory_sales" else "amount_paid"
-                query = client.table(table).select(amount_col)
-                if since:
-                    query = query.gte("created_at", since.isoformat())
-                res = query.execute()
-                if res.data:
-                    return sum(float(row.get(amount_col) or 0) for row in res.data)
-                return 0.0
-            except Exception as e:
-                logger.error(f"Error fetching {table}: {e}")
-                return 0.0
-
-        # Per-category table mapping
-        CATEGORY_TABLES = {
-            "course":    ["course_payments"],
-            "books":     ["books_payments"],
-            "transport": ["transport_payments"],
-            "accessory": ["accessory_sales", "student_accessory_payments", "accessory_transactions"],
-        }
-        ALL_TABLES = [t for tables in CATEGORY_TABLES.values() for t in tables]
-
-        def get_category_income(category: str, since: datetime | None) -> float:
-            return sum(fetch_table_income(t, since) for t in CATEGORY_TABLES[category])
-
-        def get_total_income(since: datetime | None) -> float:
-            return sum(fetch_table_income(t, since) for t in ALL_TABLES)
-
-        def get_expected_fees() -> tuple[float, float, float, float]:
-            """Returns (course_expected, books_expected, transport_expected, all_expected)."""
-            try:
-                res = client.table("students").select(
-                    "term1_fee, term2_fee, term3_fee, old_dues, has_books, books_fee, has_transport, transport_fee"
-                ).eq("is_active", True).execute()
-                course_total = books_total = transport_total = 0.0
-                for s in (res.data or []):
-                    course_total += (
-                        float(s.get("term1_fee") or 0)
-                        + float(s.get("term2_fee") or 0)
-                        + float(s.get("term3_fee") or 0)
-                        + float(s.get("old_dues") or 0)
-                    )
-                    if s.get("has_books"):
-                        books_total += float(s.get("books_fee") or 0)
-                    if s.get("has_transport"):
-                        transport_total += float(s.get("transport_fee") or 0) * 12
-                return course_total, books_total, transport_total, course_total + books_total + transport_total
-            except Exception as e:
-                logger.error(f"Error in get_expected_fees: {e}")
-                return 0.0, 0.0, 0.0, 0.0
-
-        def get_category_collected(category: str) -> float:
-            return get_category_income(category, None)  # all-time
-
-        def get_monthly_income_data() -> list[dict[str, Any]]:
-            now = datetime.now(timezone.utc)
-            # 6 months window
-            start_date = (now - timedelta(days=5 * 30)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
-            # Fetch all data in one pass per table
-            all_data: list[dict] = []
-            for table in ALL_TABLES:
-                try:
-                    amount_col = "total_amount" if table == "accessory_sales" else "amount_paid"
-                    res = client.table(table).select(f"created_at, {amount_col}").gte("created_at", start_date.isoformat()).execute()
-                    for row in (res.data or []):
-                        try:
-                            dt = datetime.fromisoformat(row["created_at"].replace('Z', '+00:00'))
-                            # Ensure timezone-aware
-                            if dt.tzinfo is None:
-                                dt = dt.replace(tzinfo=timezone.utc)
-                            all_data.append({"date": dt, "amount": float(row.get(amount_col) or 0)})
-                        except (ValueError, TypeError):
-                            pass
-                except Exception as e:
-                    logger.error(f"Error fetching {table} for monthly stats: {e}")
-
-            months = []
-            for i in range(5, -1, -1):
-                start_of_month = (now - timedelta(days=i * 30)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                # Move to actual month end
-                if start_of_month.month == 12:
-                    end_of_month = start_of_month.replace(year=start_of_month.year + 1, month=1, day=1) - timedelta(seconds=1)
-                else:
-                    end_of_month = start_of_month.replace(month=start_of_month.month + 1, day=1) - timedelta(seconds=1)
-
-                income = sum(
-                    item["amount"] for item in all_data
-                    if start_of_month <= item["date"] <= end_of_month
+        # 2. Get expected fees
+        course_expected = books_expected = transport_expected = all_expected = 0.0
+        try:
+            res = client.table("students").select(
+                "term1_fee, term2_fee, term3_fee, old_dues, has_books, books_fee, has_transport, transport_fee"
+            ).eq("is_active", True).execute()
+            for s in (res.data or []):
+                course_expected += (
+                    float(s.get("term1_fee") or 0)
+                    + float(s.get("term2_fee") or 0)
+                    + float(s.get("term3_fee") or 0)
+                    + float(s.get("old_dues") or 0)
                 )
-                months.append({
-                    "name": start_of_month.strftime("%b"),
-                    "amount": income,
-                    "displayLabel": f"₹{int(income/1000)}k" if income >= 1000 else f"₹{int(income)}",
-                    "amountFormatted": f"₹{income:,.0f}"
+                if s.get("has_books"):
+                    books_expected += float(s.get("books_fee") or 0)
+                if s.get("has_transport"):
+                    transport_expected += float(s.get("transport_fee") or 0) * 12
+            all_expected = course_expected + books_expected + transport_expected
+        except Exception as e:
+            logger.error(f"Error fetching expected fees: {e}")
+
+        # 3. Load all payments in memory for the current academic year to aggregate in python
+        course_payments = []
+        books_payments = []
+        transport_payments = []
+        student_accessory_payments = []
+        accessory_sales = []
+
+        try:
+            res = client.table("course_payments").select("amount_paid, payment_date, payment_method").execute()
+            course_payments = res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching course_payments: {e}")
+
+        try:
+            res = client.table("books_payments").select("amount_paid, payment_date, payment_method").execute()
+            books_payments = res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching books_payments: {e}")
+
+        try:
+            res = client.table("transport_payments").select("amount_paid, payment_date, payment_method").execute()
+            transport_payments = res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching transport_payments: {e}")
+
+        try:
+            res = client.table("student_accessory_payments").select("amount_paid, payment_date, payment_method").execute()
+            student_accessory_payments = res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching student_accessory_payments: {e}")
+
+        try:
+            res = client.table("accessory_sales").select("total_amount, created_at, payment_method").execute()
+            accessory_sales = res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching accessory_sales: {e}")
+
+        # Convert date strings to timezone-aware datetime objects in a unified way
+        now = datetime.now(timezone.utc)
+        today_floor = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        week_floor = today_floor - timedelta(days=7)
+        month_floor = today_floor - timedelta(days=30)
+
+        # Helper to parse dates
+        def parse_dt(dt_str):
+            if not dt_str:
+                return None
+            try:
+                dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+            except Exception:
+                return None
+
+        # Clean payment records: normalize keys, type, method, amount and parsed date
+        processed_payments = []
+
+        # Course payments
+        for p in course_payments:
+            dt = parse_dt(p.get("payment_date"))
+            if dt:
+                processed_payments.append({
+                    "category": "course",
+                    "amount": float(p.get("amount_paid") or 0.0),
+                    "method": (p.get("payment_method") or "cash").lower(),
+                    "date": dt
                 })
-            return months
+        
+        # Books payments
+        for p in books_payments:
+            dt = parse_dt(p.get("payment_date"))
+            if dt:
+                processed_payments.append({
+                    "category": "books",
+                    "amount": float(p.get("amount_paid") or 0.0),
+                    "method": (p.get("payment_method") or "cash").lower(),
+                    "date": dt
+                })
 
-        # --- Parallel data fetching ---
-        today_since   = _since_date(0)    # start of today UTC
-        week_since    = _since_date(7)    # 7 days ago
-        month_since   = _since_date(30)   # 30 days ago
+        # Transport payments
+        for p in transport_payments:
+            dt = parse_dt(p.get("payment_date"))
+            if dt:
+                processed_payments.append({
+                    "category": "transport",
+                    "amount": float(p.get("amount_paid") or 0.0),
+                    "method": (p.get("payment_method") or "cash").lower(),
+                    "date": dt
+                })
 
-        with ThreadPoolExecutor(max_workers=12) as executor:
-            f_total         = executor.submit(count_students)
-            f_new           = executor.submit(count_students, {"student_type": "new"})
-            f_today         = executor.submit(get_total_income, today_since)
-            f_week          = executor.submit(get_total_income, week_since)
-            f_month         = executor.submit(get_total_income, month_since)
-            f_expected      = executor.submit(get_expected_fees)
-            f_monthly_chart = executor.submit(get_monthly_income_data)
-            # Per-category collected (all-time) for pending calculation
-            f_course_col    = executor.submit(get_category_collected, "course")
-            f_books_col     = executor.submit(get_category_collected, "books")
-            f_transport_col = executor.submit(get_category_collected, "transport")
-            # Per-category income for today/week/month cards
-            f_today_course  = executor.submit(get_category_income, "course",    today_since)
-            f_today_books   = executor.submit(get_category_income, "books",     today_since)
-            f_today_trans   = executor.submit(get_category_income, "transport", today_since)
-            f_today_acc     = executor.submit(get_category_income, "accessory", today_since)
-            f_week_course   = executor.submit(get_category_income, "course",    week_since)
-            f_week_books    = executor.submit(get_category_income, "books",     week_since)
-            f_week_trans    = executor.submit(get_category_income, "transport", week_since)
-            f_week_acc      = executor.submit(get_category_income, "accessory", week_since)
-            f_month_course  = executor.submit(get_category_income, "course",    month_since)
-            f_month_books   = executor.submit(get_category_income, "books",     month_since)
-            f_month_trans   = executor.submit(get_category_income, "transport", month_since)
-            f_month_acc     = executor.submit(get_category_income, "accessory", month_since)
+        # Student accessory payments
+        for p in student_accessory_payments:
+            dt = parse_dt(p.get("payment_date"))
+            if dt:
+                processed_payments.append({
+                    "category": "accessory",
+                    "amount": float(p.get("amount_paid") or 0.0),
+                    "method": (p.get("payment_method") or "cash").lower(),
+                    "date": dt
+                })
 
-            total_count       = f_total.result()
-            new_count         = f_new.result()
-            today_income      = f_today.result()
-            weekly_income     = f_week.result()
-            monthly_income    = f_month.result()
-            monthly_chart_data = f_monthly_chart.result()
-            exp_course, exp_books, exp_transport, exp_total = f_expected.result()
-            col_course    = f_course_col.result()
-            col_books     = f_books_col.result()
-            col_transport = f_transport_col.result()
-            today_course  = f_today_course.result()
-            today_books   = f_today_books.result()
-            today_trans   = f_today_trans.result()
-            today_acc     = f_today_acc.result()
-            week_course   = f_week_course.result()
-            week_books    = f_week_books.result()
-            week_trans    = f_week_trans.result()
-            week_acc      = f_week_acc.result()
-            month_course  = f_month_course.result()
-            month_books   = f_month_books.result()
-            month_trans   = f_month_trans.result()
-            month_acc     = f_month_acc.result()
+        # Accessory sales
+        for p in accessory_sales:
+            dt = parse_dt(p.get("created_at"))
+            if dt:
+                processed_payments.append({
+                    "category": "accessory",
+                    "amount": float(p.get("total_amount") or 0.0),
+                    "method": (p.get("payment_method") or "cash").lower(),
+                    "date": dt
+                })
+
+        # Helper to map payment methods to frontend representation
+        def map_method(m_str):
+            m = m_str.lower()
+            if "cash" in m:
+                return "cash"
+            if "qr" in m or "upi" in m or "scan" in m or "gpay" in m or "phonepe" in m or "scanner" in m:
+                return "upi"
+            if "bank" in m or "transfer" in m or "net" in m:
+                return "bank"
+            if "card" in m:
+                return "cards"
+            if "swip" in m:
+                return "swiping"
+            return "cash"  # default fallback
+
+        # Method breakdown builders
+        def empty_breakdown():
+            return {"cash": 0.0, "upi": 0.0, "bank": 0.0, "cards": 0.0, "swiping": 0.0}
+
+        def empty_group():
+            return {
+                "All": empty_breakdown(),
+                "Course": empty_breakdown(),
+                "Books": empty_breakdown(),
+                "Transport": empty_breakdown(),
+                "Accessory": empty_breakdown()
+            }
+
+        # Initialize breakdown data structure
+        breakdowns = {
+            "today": empty_group(),
+            "week": empty_group(),
+            "month": empty_group()
+        }
+
+        # Aggregate amounts in breakdowns
+        for p in processed_payments:
+            dt = p["date"]
+            cat = p["category"]
+            m_key = map_method(p["method"])
+            amt = p["amount"]
+
+            ui_cat = "Course" if cat == "course" else "Books" if cat == "books" else "Transport" if cat == "transport" else "Accessory"
+
+            # Today
+            if dt >= today_floor:
+                breakdowns["today"]["All"][m_key] += amt
+                breakdowns["today"][ui_cat][m_key] += amt
+            
+            # Week
+            if dt >= week_floor:
+                breakdowns["week"]["All"][m_key] += amt
+                breakdowns["week"][ui_cat][m_key] += amt
+            
+            # Month
+            if dt >= month_floor:
+                breakdowns["month"]["All"][m_key] += amt
+                breakdowns["month"][ui_cat][m_key] += amt
+
+        # Helper to sum total values for dashboard cards
+        def sum_cat_since(cat: str, floor_dt: datetime | None) -> float:
+            return sum(p["amount"] for p in processed_payments if p["category"] == cat and (floor_dt is None or p["date"] >= floor_dt))
+
+        # Calculate dashboard metrics
+        today_course = sum_cat_since("course", today_floor)
+        today_books = sum_cat_since("books", today_floor)
+        today_trans = sum_cat_since("transport", today_floor)
+        today_acc = sum_cat_since("accessory", today_floor)
+        today_income = today_course + today_books + today_trans + today_acc
+
+        week_course = sum_cat_since("course", week_floor)
+        week_books = sum_cat_since("books", week_floor)
+        week_trans = sum_cat_since("transport", week_floor)
+        week_acc = sum_cat_since("accessory", week_floor)
+        weekly_income = week_course + week_books + week_trans + week_acc
+
+        month_course = sum_cat_since("course", month_floor)
+        month_books = sum_cat_since("books", month_floor)
+        month_trans = sum_cat_since("transport", month_floor)
+        month_acc = sum_cat_since("accessory", month_floor)
+        monthly_income = month_course + month_books + month_trans + month_acc
+
+        col_course = sum_cat_since("course", None)
+        col_books = sum_cat_since("books", None)
+        col_transport = sum_cat_since("transport", None)
+
+        # Monthly chart data (last 6 calendar months)
+        monthly_chart_data = []
+        for i in range(5, -1, -1):
+            start_of_month = (now - timedelta(days=i * 30)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            if start_of_month.month == 12:
+                end_of_month = start_of_month.replace(year=start_of_month.year + 1, month=1, day=1) - timedelta(seconds=1)
+            else:
+                end_of_month = start_of_month.replace(month=start_of_month.month + 1, day=1) - timedelta(seconds=1)
+
+            income = sum(
+                p["amount"] for p in processed_payments
+                if start_of_month <= p["date"] <= end_of_month
+            )
+            monthly_chart_data.append({
+                "name": start_of_month.strftime("%b"),
+                "amount": income,
+                "displayLabel": f"₹{int(income/1000)}k" if income >= 1000 else f"₹{int(income)}",
+                "amountFormatted": f"₹{income:,.0f}"
+            })
 
         result = {
             "totalStudents":  total_count,
@@ -867,12 +935,10 @@ def refresh_dashboard_stats_task():
             "todayIncome":    today_income,
             "weeklyIncome":   weekly_income,
             "monthlyIncome":  monthly_income,
-            # Per-category pending (expected - collected, floor 0)
-            "pendingCourse":    max(exp_course    - col_course,    0),
-            "pendingBooks":     max(exp_books     - col_books,     0),
-            "pendingTransport": max(exp_transport - col_transport, 0),
-            "pendingFees":      max(exp_total     - col_course - col_books - col_transport, 0),
-            # Per-category income splits for dashboard cards
+            "pendingCourse":    max(course_expected    - col_course,    0),
+            "pendingBooks":     max(books_expected     - col_books,     0),
+            "pendingTransport": max(transport_expected - col_transport, 0),
+            "pendingFees":      max(all_expected     - col_course - col_books - col_transport, 0),
             "todayCourse":     today_course,
             "todayBooks":      today_books,
             "todayTransport":  today_trans,
@@ -885,9 +951,11 @@ def refresh_dashboard_stats_task():
             "monthlyBooks":    month_books,
             "monthlyTransport":month_trans,
             "monthlyAccessories":month_acc,
+            "categoryBreakdowns": breakdowns,
             "monthlyChartData": monthly_chart_data,
             "lastUpdated": datetime.now(timezone.utc).isoformat()
         }
+        
         cache_set("dashboard:stats", result, STATS_CACHE_TTL_SECONDS)
         save_stats_to_disk(result)
         logger.info("Background thread: Successfully refreshed dashboard stats.")

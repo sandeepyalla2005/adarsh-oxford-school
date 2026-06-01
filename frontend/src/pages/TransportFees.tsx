@@ -74,6 +74,7 @@ interface StudentTransportFee {
   totalPending: number;
 }
 
+
 export default function TransportFees() {
   const { user, isStaff } = useAuth();
   const { toast } = useToast();
