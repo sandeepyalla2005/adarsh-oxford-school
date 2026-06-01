@@ -422,7 +422,7 @@ def get_receipt_table_candidates(receipt_type: Optional[str] = None):
         "course": ("course_payments", "*, students(full_name, admission_number, father_name, father_phone, mother_name, mother_phone, classes(name))"),
         "books": ("books_payments", "*, students(full_name, admission_number, father_name, father_phone, mother_name, mother_phone, classes(name))"),
         "transport": ("transport_payments", "*, students(full_name, admission_number, father_name, father_phone, mother_name, mother_phone, classes(name))"),
-        "accessories": ("student_accessory_payments", "*, students(full_name, admission_number, father_name, father_phone, mother_name, mother_phone, classes(name)), accessory_categories(name)"),
+        "accessories": ("student_accessory_payments", "*, students(full_name, admission_number, father_name, father_phone, mother_name, mother_phone, classes(name))"),
         "accessory": ("accessory_sales", "*, students(full_name, admission_number, father_name, father_phone, mother_name, mother_phone, classes(name)), accessories(item_name)"),
         "left_student": ("left_student_recovery_payments", "*, left_student_fee_records(pending_term_fee, pending_transport_fee, pending_books_fee, old_due, students(full_name, admission_number, father_name, father_phone, mother_name, mother_phone, classes(name)))"),
     }
@@ -632,10 +632,30 @@ def get_receipt(receipt_no: str, type: Optional[str] = None, user=Depends(get_cu
     try:
         admin_client = get_admin_client()
         for receipt_kind, table_name, select_clause in get_receipt_table_candidates(type):
-            query = admin_client.table(table_name).select(select_clause).eq("receipt_number", receipt_no)
-            response = query.execute()
-            if response.data:
-                return response.data
+            try:
+                query = admin_client.table(table_name).select(select_clause).eq("receipt_number", receipt_no)
+                response = query.execute()
+                if response.data:
+                    # Manually resolve accessory category details if this is student_accessory_payments
+                    if table_name == "student_accessory_payments":
+                        cat_ids = list(set(row.get("category_id") for row in response.data if row.get("category_id")))
+                        if cat_ids:
+                            cat_res = admin_client.table("accessory_categories").select("id, name").in_("id", cat_ids).execute()
+                            cat_map = {c["id"]: c["name"] for c in (cat_res.data or [])}
+                            for row in response.data:
+                                cid = row.get("category_id")
+                                if cid and cid in cat_map:
+                                    row["accessory_categories"] = {"name": cat_map[cid]}
+                                else:
+                                    row["accessory_categories"] = {"name": "Accessory Fee"}
+                        else:
+                            for row in response.data:
+                                row["accessory_categories"] = {"name": "Accessory Fee"}
+                    return response.data
+            except Exception as inner_error:
+                logger.error(f"Error querying table {table_name} for receipt {receipt_no}: {inner_error}")
+                if type:
+                    raise HTTPException(status_code=500, detail=str(inner_error))
 
         raise HTTPException(status_code=404, detail="Receipt not found")
     except HTTPException:
