@@ -201,14 +201,8 @@ export default function PendingFees() {
         const booksPending = student.has_books ? Math.max(0, (student.books_fee || 0) - booksPaid) : 0;
 
         const paidMonths = transportPaymentMap.get(student.id) || [];
-        const ACADEMIC_MONTHS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3];
-        const getElapsedMonths = (month: number): number[] => {
-          const index = ACADEMIC_MONTHS.indexOf(month);
-          if (index === -1) return [];
-          return ACADEMIC_MONTHS.slice(0, index + 1);
-        };
-        const elapsedMonths = getElapsedMonths(currentMonth);
-        const pendingMonths = elapsedMonths.filter(m => !paidMonths.includes(m));
+        const TRANSPORT_MONTHS = [6, 7, 8, 9, 10, 11, 12, 1, 2, 3, 4];
+        const pendingMonths = TRANSPORT_MONTHS.filter(m => !paidMonths.includes(m));
         const monthlyFee = student.has_transport ? ((student.transport_fee || 0) / 11) : 0;
         const transportPending = pendingMonths.length * monthlyFee;
 

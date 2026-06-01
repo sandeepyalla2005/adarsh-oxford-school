@@ -146,23 +146,17 @@ export default function TransportFees() {
         paymentMap.set(p.student_id, existing);
       });
 
-      // Define academic year months order (Apr-Mar cycle)
-      const ACADEMIC_MONTHS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3];
-      const getElapsedMonths = (month: number): number[] => {
-        const index = ACADEMIC_MONTHS.indexOf(month);
-        if (index === -1) return [];
-        return ACADEMIC_MONTHS.slice(0, index + 1);
-      };
-
+      // Define active transport months (excluding May summer holidays)
+      const TRANSPORT_MONTHS = [6, 7, 8, 9, 10, 11, 12, 1, 2, 3, 4];
+      
       const enrichedStudents: StudentTransportFee[] = (studentsData as any[] || []).map(student => {
         // Use student's own transport_fee column divided by 11 for monthly fee
         const monthlyFee = (student as any).has_transport ? (Number((student as any).transport_fee) || 0) / 11 : 0;
 
         const paidMonths = paymentMap.get(student.id) || [];
-        const elapsedMonths = getElapsedMonths(currentMonth);
         
-        // Find which elapsed months are not paid
-        const pendingMonths = elapsedMonths.filter(m => !paidMonths.includes(m));
+        // Find which transport months are not paid
+        const pendingMonths = TRANSPORT_MONTHS.filter(m => !paidMonths.includes(m));
 
         return {
           ...student,
