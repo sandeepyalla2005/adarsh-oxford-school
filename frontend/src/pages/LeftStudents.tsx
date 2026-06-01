@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { getCurrentAcademicYear } from '@/lib/academic-year';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { 
   Search, 
   IndianRupee, 
@@ -19,10 +19,9 @@ import {
   Check, 
   X, 
   Eye, 
-  Layers,
-  ArrowRight,
+  FileCheck,
   TrendingUp,
-  FileCheck
+  BookOpen
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/lib/auth';
@@ -48,22 +47,20 @@ export default function LeftStudents() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  // Navigation tab state
-  const [activeTab, setActiveTab] = useState<'tc_issued' | 'all_leaving' | 'class_10'>('tc_issued');
-
-  // Filter States
+  // Advanced Filters States
   const [search, setSearch] = useState('');
-  const [academicYear, setAcademicYear] = useState(getCurrentAcademicYear());
+  const [academicYear, setAcademicYear] = useState('all');
   const [classFilter, setClassFilter] = useState('all');
-  const [feeStatusFilter, setFeeStatusFilter] = useState('all');
   const [leavingTypeFilter, setLeavingTypeFilter] = useState('all');
+  const [tcStatusFilter, setTcStatusFilter] = useState('all');
+  const [feeStatusFilter, setFeeStatusFilter] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
   // Modals state
   const [selectedRecord, setSelectedRecord] = useState<any>(null);
   
-  // Document status tracking modal state
+  // Document status & leaving details modal state
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
   const [docForm, setDocForm] = useState<DocumentDetails>({
     reason: '',
@@ -71,6 +68,7 @@ export default function LeftStudents() {
     tc_issued: false,
     tc_number: ''
   });
+  const [leavingTypeForm, setLeavingTypeForm] = useState('dropout');
   const [isUpdatingDocs, setIsUpdatingDocs] = useState(false);
 
   // Fee collection modal state
@@ -90,9 +88,9 @@ export default function LeftStudents() {
     old_due: ''
   });
 
-  // Query to fetch all records (we do filtering client-side for maximum speed and accuracy)
+  // Query to fetch all records
   const { data: rawLeftStudents = [], isLoading, refetch } = useQuery({
-    queryKey: ['left-students-all'],
+    queryKey: ['left-students-all-register'],
     queryFn: async () => {
       const resp = await apiFetch('/api/left-students?status=all');
       if (!resp.ok) throw new Error('Failed to fetch left students');
@@ -134,6 +132,19 @@ export default function LeftStudents() {
       derivedFeeStatus = 'PARTIAL';
     }
 
+    // Determine normalized display leaving type
+    let leavingTypeDisplay = 'Dropout';
+    const statusLower = record.leaving_status.toLowerCase();
+    if (statusLower === 'completed_10th') {
+      leavingTypeDisplay = 'Class 10 Completed';
+    } else if (statusLower === 'transfer' || statusLower === 'tc_issued') {
+      leavingTypeDisplay = 'Transfer';
+    } else if (statusLower === 'migration') {
+      leavingTypeDisplay = 'Migration';
+    } else if (statusLower === 'discontinued') {
+      leavingTypeDisplay = 'Discontinued';
+    }
+
     return {
       ...record,
       reasonText,
@@ -141,47 +152,22 @@ export default function LeftStudents() {
       tcIssued,
       tcNumber,
       currentDue,
-      derivedFeeStatus
+      derivedFeeStatus,
+      leavingTypeDisplay
     };
   };
 
   const parsedStudents = rawLeftStudents.map(parseRecord);
 
-  // Tab division filtering logic
-  const getTabFilteredStudents = () => {
-    return parsedStudents.filter((student: any) => {
-      // 1. Tab Level Filters
-      if (activeTab === 'tc_issued') {
-        // T.C Issued Tab shows any student with a T.C. issued, regardless of fee status.
-        return student.tcIssued === true;
-      }
-      
-      if (activeTab === 'all_leaving') {
-        // All Leaving Tab shows dropouts and left students (excluding Class 10 completed) who have pending dues > 0.
-        // Dues fully cleared students are NOT shown here.
-        return student.leaving_status !== 'completed_10th' && student.currentDue > 0;
-      }
-
-      if (activeTab === 'class_10') {
-        // Class 10 Completed Tab shows all Class 10 graduates regardless of fee status.
-        return student.leaving_status === 'completed_10th';
-      }
-
-      return true;
-    });
-  };
-
-  // Advanced Filters logic applied on top of tab filtered list
+  // Apply Advanced Filters on the full Student Exit Register
   const getFullyFilteredStudents = () => {
-    const tabFiltered = getTabFilteredStudents();
-
-    return tabFiltered.filter((student: any) => {
+    return parsedStudents.filter((student: any) => {
       const studentDetails = student.students || {};
       const className = studentDetails.classes?.name || '';
       const fullName = (studentDetails.full_name || '').toLowerCase();
       const admNum = (studentDetails.admission_number || '').toLowerCase();
 
-      // Search by Name or Admission Number
+      // Search by Student Name or Admission Number
       if (search) {
         const query = search.toLowerCase();
         if (!fullName.includes(query) && !admNum.includes(query)) return false;
@@ -192,20 +178,20 @@ export default function LeftStudents() {
         if (className.toLowerCase() !== classFilter.toLowerCase()) return false;
       }
 
+      // Leaving Type Filter
+      if (leavingTypeFilter !== 'all') {
+        if (student.leavingTypeDisplay.toLowerCase() !== leavingTypeFilter.toLowerCase()) return false;
+      }
+
+      // T.C. Status Filter
+      if (tcStatusFilter !== 'all') {
+        const wantsIssued = tcStatusFilter === 'issued';
+        if (student.tcIssued !== wantsIssued) return false;
+      }
+
       // Fee Status Filter
       if (feeStatusFilter !== 'all') {
         if (student.derivedFeeStatus.toLowerCase() !== feeStatusFilter.toLowerCase()) return false;
-      }
-
-      // Leaving Type Filter
-      if (leavingTypeFilter !== 'all') {
-        if (student.leaving_status.toLowerCase() !== leavingTypeFilter.toLowerCase()) return false;
-      }
-
-      // Academic Year Filter
-      if (academicYear && academicYear !== 'all') {
-        // If the record does not have academic year info, we skip check or match against student metadata
-        // For safe measure, we can compare if academic year is defined
       }
 
       // Date Range Filter
@@ -217,7 +203,6 @@ export default function LeftStudents() {
       if (endDate) {
         const leaveDate = new Date(student.leaving_date);
         const end = new Date(endDate);
-        // Make end date inclusive of the day
         end.setHours(23, 59, 59, 999);
         if (leaveDate > end) return false;
       }
@@ -228,52 +213,30 @@ export default function LeftStudents() {
 
   const finalFilteredStudents = getFullyFilteredStudents();
 
-  // Summary Cards Calculations
-  const getSummaryStats = () => {
-    if (activeTab === 'tc_issued') {
-      const tcList = parsedStudents.filter((s: any) => s.tcIssued === true);
-      const cleared = tcList.filter((s: any) => s.currentDue <= 0).length;
-      const pending = tcList.filter((s: any) => s.currentDue > 0).length;
-      return {
-        card1: { title: 'Total T.C. Issued', val: tcList.length, color: 'text-blue-600 bg-blue-50', desc: 'Active Transfer Certificates' },
-        card2: { title: 'Cleared Fee Students', val: cleared, color: 'text-emerald-600 bg-emerald-50', desc: 'No Outstanding Dues' },
-        card3: { title: 'Pending Fee Students', val: pending, color: 'text-rose-600 bg-rose-50', desc: 'Outstanding Recoveries' }
-      };
-    }
-
-    if (activeTab === 'all_leaving') {
-      const leavingList = parsedStudents.filter((s: any) => s.leaving_status !== 'completed_10th' && s.currentDue > 0);
-      const totalPendingDues = leavingList.reduce((sum: number, s: any) => sum + s.currentDue, 0);
-      const pendingRecovery = leavingList.filter((s: any) => s.derivedFeeStatus === 'PENDING').length;
-      const totalRecovered = leavingList.reduce((sum: number, s: any) => sum + s.recovered_amount, 0);
-
-      return {
-        card1: { title: 'Total Leaving Students', val: leavingList.length, color: 'text-amber-600 bg-amber-50', desc: 'With outstanding recoveries' },
-        card2: { title: 'Total Pending Dues', val: `₹${totalPendingDues.toLocaleString('en-IN')}`, color: 'text-rose-600 bg-rose-50', desc: 'Awaiting fee collection' },
-        card3: { title: 'Pending Recovery Cases', val: pendingRecovery, color: 'text-blue-600 bg-blue-50', desc: 'No recovery payment made' },
-        card4: { title: 'Recovered Amount', val: `₹${totalRecovered.toLocaleString('en-IN')}`, color: 'text-emerald-600 bg-emerald-50', desc: 'Recovered so far' }
-      };
-    }
-
-    // Default to 'class_10'
-    const class10List = parsedStudents.filter((s: any) => s.leaving_status === 'completed_10th');
-    const marksheetCount = class10List.filter((s: any) => s.marksheetIssued === true).length;
-    const tcCount = class10List.filter((s: any) => s.tcIssued === true).length;
-    const pendingDocs = class10List.filter((s: any) => !s.marksheetIssued || !s.tcIssued).length;
-
-    return {
-      card1: { title: 'Total Class 10 Students', val: class10List.length, color: 'text-indigo-600 bg-indigo-50', desc: 'Graduated Batch' },
-      card2: { title: 'Mark Sheets Issued', val: marksheetCount, color: 'text-emerald-600 bg-emerald-50', desc: 'Handed over to students' },
-      card3: { title: 'T.C. Issued', val: tcCount, color: 'text-blue-600 bg-blue-50', desc: 'Transfer Certificates given' },
-      card4: { title: 'Pending Documents', val: pendingDocs, color: 'text-amber-600 bg-amber-50', desc: 'Outstanding issuance' }
-    };
-  };
-
-  const stats = getSummaryStats();
+  // Summary Cards Calculations (Always calculated over the full list of leaving students)
+  const totalLeavingCount = parsedStudents.length;
+  const tcIssuedCount = parsedStudents.filter((s: any) => s.tcIssued === true).length;
+  const tcPendingCount = parsedStudents.filter((s: any) => s.tcIssued !== true).length;
+  const totalPendingDuesAmount = parsedStudents.reduce((sum: number, s: any) => sum + s.currentDue, 0);
 
   // Document issuance and details handlers
   const openDocModal = (record: any) => {
     setSelectedRecord(record);
+    
+    // Determine initial form leaving type
+    let statusVal = 'dropout';
+    const statusLower = record.leaving_status.toLowerCase();
+    if (statusLower === 'completed_10th') {
+      statusVal = 'completed_10th';
+    } else if (statusLower === 'transfer' || statusLower === 'tc_issued') {
+      statusVal = 'transfer';
+    } else if (statusLower === 'migration') {
+      statusVal = 'migration';
+    } else if (statusLower === 'discontinued') {
+      statusVal = 'discontinued';
+    }
+
+    setLeavingTypeForm(statusVal);
     setDocForm({
       reason: record.reasonText || '',
       marksheet_issued: record.marksheetIssued || false,
@@ -295,8 +258,14 @@ export default function LeftStudents() {
         tc_number: docForm.tc_issued ? docForm.tc_number : ''
       });
 
-      // Update both database fields: leaving_reason and leaving_status (if T.C. is marked as issued)
-      const derivedLeavingStatus = docForm.tc_issued ? 'tc_issued' : selectedRecord.leaving_status;
+      // leaving_status is driven by the form dropdown
+      // Wait, if tc_issued is toggled on, should it override status?
+      // Business Requirement: "When a T.C. is generated, update T.C. Status to Issued but keep the student in the same module."
+      // So we just save the leaving_status dropdown selection, e.g., 'completed_10th' or 'transfer' or 'dropout'.
+      let derivedLeavingStatus = leavingTypeForm;
+      if (leavingTypeForm === 'transfer' && docForm.tc_issued) {
+        derivedLeavingStatus = 'tc_issued';
+      }
 
       const resp = await apiFetch('/api/left-students/update-details', {
         method: 'POST',
@@ -313,7 +282,7 @@ export default function LeftStudents() {
         throw new Error(error.detail || 'Failed to update documents');
       }
 
-      toast({ title: '🎉 Record Updated', description: 'Student leaving details and document status saved.' });
+      toast({ title: '🎉 Exit Register Updated', description: 'Student leaving details and document status saved.' });
       setIsDocModalOpen(false);
       refetch();
     } catch (err: any) {
@@ -395,7 +364,7 @@ export default function LeftStudents() {
     }
   };
 
-  // Fee editing handlers (Admin only)
+  // Fee editing handlers (Admin/feeInCharge only)
   const openEditModal = (record: any) => {
     setSelectedRecord(record);
     setEditFeeForm({
@@ -447,18 +416,6 @@ export default function LeftStudents() {
     }
   };
 
-  const getDocStatusBadge = (issued: boolean) => {
-    return issued ? (
-      <Badge variant="outline" className="bg-emerald-100 text-emerald-700 border-emerald-200 flex items-center gap-1 w-fit rounded-full px-2 py-0.5">
-        <Check className="h-3 w-3" /> Issued
-      </Badge>
-    ) : (
-      <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-200 flex items-center gap-1 w-fit rounded-full px-2 py-0.5">
-        <X className="h-3 w-3" /> Not Issued
-      </Badge>
-    );
-  };
-
   const handleDownloadPlaceholder = (docName: string, studentName: string) => {
     toast({
       title: '📥 Download Started',
@@ -475,10 +432,10 @@ export default function LeftStudents() {
           <div>
             <h1 className="text-3xl font-extrabold tracking-tight text-[#002147] font-display flex items-center gap-3">
               <UserMinus className="h-9 w-9 text-blue-600" />
-              Left Students & TC Management
+              Student Exit Register
             </h1>
-            <p className="text-slate-500 mt-2 text-sm max-w-2xl">
-              Track Transfer Certificates (T.C.), manage Mark Sheets, and follow up on outstanding fee recoveries in a secure school ERP environment.
+            <p className="text-slate-500 mt-2 text-sm max-w-3xl font-medium">
+              Manage all students who have left the institution, including T.C. issuance, fee recovery, and Class 10 completion records.
             </p>
           </div>
           
@@ -497,95 +454,83 @@ export default function LeftStudents() {
 
         {/* Dashboard Statistics Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <AnimatePresence mode="wait">
-            {Object.entries(stats).map(([key, stat]: [string, any]) => (
-              <motion.div
-                key={`${activeTab}-${key}`}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.2 }}
-                className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between"
-              >
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="text-xs uppercase font-extrabold tracking-wider text-slate-400">{stat.title}</p>
-                    <p className="text-2xl font-black text-slate-800 mt-2">{stat.val}</p>
-                  </div>
-                  <div className={`h-10 w-10 rounded-xl flex items-center justify-center ${stat.color}`}>
-                    {key === 'card1' && <UserMinus className="h-5 w-5" />}
-                    {key === 'card2' && <CheckCircle className="h-5 w-5" />}
-                    {key === 'card3' && <AlertTriangle className="h-5 w-5" />}
-                    {key === 'card4' && <TrendingUp className="h-5 w-5" />}
-                  </div>
-                </div>
-                <p className="text-xs text-slate-500 mt-3 font-medium">{stat.desc}</p>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
+          
+          {/* Card 1: Total Leaving Students */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-xs uppercase font-extrabold tracking-wider text-slate-400">Total Leaving Students</p>
+                <p className="text-2xl font-black text-slate-800 mt-2">{totalLeavingCount}</p>
+              </div>
+              <div className="h-10 w-10 rounded-xl flex items-center justify-center text-blue-600 bg-blue-50">
+                <UserMinus className="h-5 w-5" />
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-3 font-medium">Exited student records total</p>
+          </div>
 
-        {/* Modular Top Navigation Tabs */}
-        <div className="flex border-b border-slate-200 gap-1 bg-white p-1 rounded-2xl border w-fit shadow-sm">
-          {[
-            { id: 'tc_issued', label: 'T.C. Issued Students', icon: FileCheck },
-            { id: 'all_leaving', label: 'All Leaving Students', icon: UserMinus },
-            { id: 'class_10', label: 'Class 10 Completed', icon: GraduationCap }
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isSelected = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => {
-                  setActiveTab(tab.id as any);
-                  setSearch(''); // clear search when switching tabs
-                }}
-                className={`flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-bold transition-all ${
-                  isSelected 
-                    ? 'bg-[#002147] text-white shadow-md' 
-                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                {tab.label}
-              </button>
-            );
-          })}
+          {/* Card 2: T.C. Issued */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-xs uppercase font-extrabold tracking-wider text-slate-400">T.C. Issued</p>
+                <p className="text-2xl font-black text-emerald-600 mt-2">{tcIssuedCount}</p>
+              </div>
+              <div className="h-10 w-10 rounded-xl flex items-center justify-center text-emerald-600 bg-emerald-50">
+                <FileCheck className="h-5 w-5" />
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-3 font-medium">Official T.C. certificates issued</p>
+          </div>
+
+          {/* Card 3: T.C. Pending */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-xs uppercase font-extrabold tracking-wider text-slate-400">T.C. Pending</p>
+                <p className="text-2xl font-black text-amber-600 mt-2">{tcPendingCount}</p>
+              </div>
+              <div className="h-10 w-10 rounded-xl flex items-center justify-center text-amber-600 bg-amber-50">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-3 font-medium">Transfer certificates awaiting issuance</p>
+          </div>
+
+          {/* Card 4: Total Pending Dues */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-xs uppercase font-extrabold tracking-wider text-slate-400">Total Pending Dues</p>
+                <p className="text-2xl font-black text-rose-600 mt-2">₹{totalPendingDuesAmount.toLocaleString('en-IN')}</p>
+              </div>
+              <div className="h-10 w-10 rounded-xl flex items-center justify-center text-rose-600 bg-rose-50">
+                <IndianRupee className="h-5 w-5" />
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-3 font-medium">Fee recovery outstanding amount</p>
+          </div>
+
         </div>
 
         {/* Advanced Filters Panel */}
         <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
           <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
             <Filter className="h-4 w-4 text-blue-600" />
-            <h3 className="font-bold text-slate-800 text-sm">Advanced Search & Filters</h3>
+            <h3 className="font-bold text-slate-800 text-sm">Advanced Search & Exit Filters</h3>
           </div>
           
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-4">
             
             {/* Search Input */}
-            <div className="relative">
+            <div className="relative xl:col-span-2">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <Input
-                placeholder="Search name / adm..."
+                placeholder="Search Name or Adm No..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-9 h-10 rounded-xl border-slate-200 bg-[#F8FAFC] text-slate-800 focus:bg-white text-xs font-semibold"
               />
-            </div>
-
-            {/* Academic Year Selector */}
-            <div>
-              <Select value={academicYear} onValueChange={setAcademicYear}>
-                <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-[#F8FAFC] text-xs font-semibold text-slate-700">
-                  <SelectValue placeholder="Academic Year" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Years</SelectItem>
-                  <SelectItem value="2025-2026">2025-2026</SelectItem>
-                  <SelectItem value="2024-2025">2024-2025</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
 
             {/* Class Selector */}
@@ -607,13 +552,29 @@ export default function LeftStudents() {
             <div>
               <Select value={leavingTypeFilter} onValueChange={setLeavingTypeFilter}>
                 <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-[#F8FAFC] text-xs font-semibold text-slate-700">
-                  <SelectValue placeholder="Leaving Reason" />
+                  <SelectValue placeholder="Leaving Type" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Leaving Types</SelectItem>
+                  <SelectItem value="all">All Exits</SelectItem>
                   <SelectItem value="dropout">Dropout</SelectItem>
-                  <SelectItem value="tc_issued">TC Issued</SelectItem>
-                  <SelectItem value="completed_10th">Completed Class 10</SelectItem>
+                  <SelectItem value="transfer">Transfer</SelectItem>
+                  <SelectItem value="migration">Migration</SelectItem>
+                  <SelectItem value="class 10 completed">Class 10 Completed</SelectItem>
+                  <SelectItem value="discontinued">Discontinued</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* T.C. Status Selector */}
+            <div>
+              <Select value={tcStatusFilter} onValueChange={setTcStatusFilter}>
+                <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-[#F8FAFC] text-xs font-semibold text-slate-700">
+                  <SelectValue placeholder="T.C. Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All T.C. Status</SelectItem>
+                  <SelectItem value="issued">TC Issued</SelectItem>
+                  <SelectItem value="pending">TC Pending</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -634,7 +595,7 @@ export default function LeftStudents() {
             </div>
 
             {/* Date Picker Controls */}
-            <div className="flex gap-2">
+            <div className="flex gap-2 xl:col-span-2">
               <Input
                 type="date"
                 value={startDate}
@@ -654,47 +615,21 @@ export default function LeftStudents() {
           </div>
         </div>
 
-        {/* Compact ERP Data Table */}
+        {/* Compact Exit Register Data Table */}
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
               <thead className="bg-[#002147] text-white font-bold border-b border-slate-200">
                 <tr>
-                  <th className="px-6 py-4">Student Details</th>
-                  
-                  {activeTab === 'tc_issued' && (
-                    <>
-                      <th className="px-6 py-4">Leaving Date</th>
-                      <th className="px-6 py-4">T.C. Number</th>
-                      <th className="px-6 py-4">Fee Status</th>
-                      <th className="px-6 py-4 text-right">Pending Amount</th>
-                      <th className="px-6 py-4 text-center">T.C. Document</th>
-                    </>
-                  )}
-
-                  {activeTab === 'all_leaving' && (
-                    <>
-                      <th className="px-6 py-4">Leaving Reason</th>
-                      <th className="px-6 py-4">Leaving Date</th>
-                      <th className="px-6 py-4 text-right">Total Due</th>
-                      <th className="px-6 py-4 text-right">Amount Paid</th>
-                      <th className="px-6 py-4 text-right">Balance Due</th>
-                      <th className="px-6 py-4">Recovery Status</th>
-                    </>
-                  )}
-
-                  {activeTab === 'class_10' && (
-                    <>
-                      <th className="px-6 py-4">Completion Date</th>
-                      <th className="px-6 py-4">Fee Status</th>
-                      <th className="px-6 py-4 text-right">Pending Amount</th>
-                      <th className="px-6 py-4">Mark Sheet Status</th>
-                      <th className="px-6 py-4">T.C. Status</th>
-                      <th className="px-6 py-4 text-center">Downloads</th>
-                    </>
-                  )}
-
-                  <th className="px-6 py-4 text-right">Actions</th>
+                  <th className="px-5 py-4">Student Details</th>
+                  <th className="px-5 py-4">Leaving Type</th>
+                  <th className="px-5 py-4">Leaving Date</th>
+                  <th className="px-5 py-4 text-center">T.C. Status</th>
+                  <th className="px-5 py-4 text-center">T.C. Number</th>
+                  <th className="px-5 py-4 text-right">Fee Information</th>
+                  <th className="px-5 py-4 text-center">Fee Status</th>
+                  <th className="px-5 py-4 text-center">Marksheet Status</th>
+                  <th className="px-5 py-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
@@ -702,7 +637,7 @@ export default function LeftStudents() {
                   <tr>
                     <td colSpan={10} className="px-6 py-12 text-center text-slate-500 font-bold">
                       <RefreshCw className="h-6 w-6 animate-spin mx-auto text-blue-600 mb-2" />
-                      Loading records from ERP database...
+                      Loading records from ERP Exit Register...
                     </td>
                   </tr>
                 ) : finalFilteredStudents.length === 0 ? (
@@ -719,155 +654,136 @@ export default function LeftStudents() {
                   finalFilteredStudents.map((record: any) => {
                     const studentDetails = record.students || {};
                     const isCleared = record.currentDue <= 0;
+                    const isClass10 = studentDetails.classes?.name?.toLowerCase().includes('class 10') || record.leaving_status === 'completed_10th';
                     
                     return (
                       <tr key={record.id} className="hover:bg-slate-50/50 transition-colors">
                         
-                        {/* Student Column (Constant) */}
-                        <td className="px-6 py-4">
+                        {/* 1. Student Details */}
+                        <td className="px-5 py-4">
                           <div className="font-extrabold text-slate-800 text-sm">{studentDetails.full_name}</div>
                           <div className="text-[10px] font-bold text-slate-400 mt-0.5">Adm No: {studentDetails.admission_number}</div>
                           <div className="text-[10px] font-bold text-slate-500">Class: {studentDetails.classes?.name || 'N/A'}</div>
                         </td>
 
-                        {/* Tab Specific Columns */}
-                        
-                        {/* 1. TC Issued Tab */}
-                        {activeTab === 'tc_issued' && (
-                          <>
-                            <td className="px-6 py-4 text-slate-600 font-bold">
-                              {new Date(record.leaving_date).toLocaleDateString('en-IN')}
-                            </td>
-                            <td className="px-6 py-4 font-mono font-bold text-blue-700">
-                              {record.tcNumber || 'N/A'}
-                            </td>
-                            <td className="px-6 py-4">
-                              <Badge className={`rounded-full px-2.5 py-0.5 text-[10px] ${getFeeStatusColor(record.derivedFeeStatus)}`}>
-                                {record.derivedFeeStatus}
-                              </Badge>
-                            </td>
-                            <td className="px-6 py-4 text-right text-slate-700 font-bold">
-                              ₹{record.currentDue.toLocaleString('en-IN')}
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              <Button 
-                                size="sm" 
-                                variant="outline"
-                                onClick={() => handleDownloadPlaceholder('Transfer Certificate', studentDetails.full_name)}
-                                className="h-8 rounded-lg text-[10px] font-bold border-slate-200 text-slate-600 hover:text-blue-600 px-3 flex gap-1.5 mx-auto"
-                              >
-                                <Download className="h-3 w-3" /> Download
-                              </Button>
-                            </td>
-                          </>
-                        )}
+                        {/* 2. Leaving Type */}
+                        <td className="px-5 py-4 font-bold text-slate-700">
+                          {record.leavingTypeDisplay}
+                        </td>
 
-                        {/* 2. All Leaving Students Tab */}
-                        {activeTab === 'all_leaving' && (
-                          <>
-                            <td className="px-6 py-4 text-slate-700">
-                              <span className="capitalize font-bold">{record.leaving_status.replace('_', ' ')}</span>
-                              {record.reasonText && <div className="text-[10px] text-slate-400 font-bold italic mt-0.5">"{record.reasonText}"</div>}
-                            </td>
-                            <td className="px-6 py-4 text-slate-600">
-                              {new Date(record.leaving_date).toLocaleDateString('en-IN')}
-                            </td>
-                            <td className="px-6 py-4 text-right text-slate-700">
-                              ₹{(parseFloat(record.total_pending_amount) || 0).toLocaleString('en-IN')}
-                            </td>
-                            <td className="px-6 py-4 text-right text-emerald-600">
-                              ₹{(parseFloat(record.recovered_amount) || 0).toLocaleString('en-IN')}
-                            </td>
-                            <td className="px-6 py-4 text-right text-rose-600 font-black">
-                              ₹{record.currentDue.toLocaleString('en-IN')}
-                            </td>
-                            <td className="px-6 py-4">
-                              <Badge className={`rounded-full px-2.5 py-0.5 text-[10px] ${getFeeStatusColor(record.derivedFeeStatus)}`}>
-                                {record.derivedFeeStatus}
-                              </Badge>
-                            </td>
-                          </>
-                        )}
+                        {/* 3. Leaving Date */}
+                        <td className="px-5 py-4 text-slate-600">
+                          {new Date(record.leaving_date).toLocaleDateString('en-IN')}
+                        </td>
 
-                        {/* 3. Class 10 Completed Tab */}
-                        {activeTab === 'class_10' && (
-                          <>
-                            <td className="px-6 py-4 text-slate-600">
-                              {new Date(record.leaving_date).toLocaleDateString('en-IN')}
-                            </td>
-                            <td className="px-6 py-4">
-                              <Badge className={`rounded-full px-2.5 py-0.5 text-[10px] ${getFeeStatusColor(record.derivedFeeStatus)}`}>
-                                {record.derivedFeeStatus}
+                        {/* 4. T.C. Status */}
+                        <td className="px-5 py-4 text-center">
+                          {record.tcIssued ? (
+                            <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 rounded-full px-2.5 py-0.5 text-[10px] w-fit mx-auto border font-bold">
+                              TC Issued
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-amber-100 text-amber-700 border-amber-200 rounded-full px-2.5 py-0.5 text-[10px] w-fit mx-auto border font-bold">
+                              TC Pending
+                            </Badge>
+                          )}
+                        </td>
+
+                        {/* 5. T.C. Number */}
+                        <td className="px-5 py-4 text-center font-mono font-bold text-slate-600">
+                          {record.tcIssued ? (record.tcNumber || 'TC/GEN') : '-'}
+                        </td>
+
+                        {/* 6. Fee Information */}
+                        <td className="px-5 py-4 text-right whitespace-nowrap">
+                          <div className="font-bold text-slate-700">Total: ₹{(parseFloat(record.total_pending_amount) || 0).toLocaleString('en-IN')}</div>
+                          <div className="text-[10px] text-emerald-600 font-bold mt-0.5">Paid: ₹{(parseFloat(record.recovered_amount) || 0).toLocaleString('en-IN')}</div>
+                          <div className="text-[10px] text-rose-600 font-extrabold">Due: ₹{record.currentDue.toLocaleString('en-IN')}</div>
+                        </td>
+
+                        {/* 7. Fee Status */}
+                        <td className="px-5 py-4 text-center">
+                          <Badge className={`rounded-full px-2.5 py-0.5 text-[10px] border ${getFeeStatusColor(record.derivedFeeStatus)}`}>
+                            {record.derivedFeeStatus === 'CLEARED' ? 'Cleared' : record.derivedFeeStatus === 'PARTIAL' ? 'Partial' : 'Pending'}
+                          </Badge>
+                        </td>
+
+                        {/* 8. Marksheet Status */}
+                        <td className="px-5 py-4 text-center">
+                          {isClass10 ? (
+                            record.marksheetIssued ? (
+                              <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 rounded-full px-2.5 py-0.5 text-[10px] w-fit mx-auto border font-bold">
+                                Issued
                               </Badge>
-                            </td>
-                            <td className="px-6 py-4 text-right text-slate-700 font-black">
-                              ₹{record.currentDue.toLocaleString('en-IN')}
-                            </td>
-                            <td className="px-6 py-4">
-                              {getDocStatusBadge(record.marksheetIssued)}
-                            </td>
-                            <td className="px-6 py-4">
-                              {getDocStatusBadge(record.tcIssued)}
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex flex-col gap-1 items-center">
-                                <button 
-                                  onClick={() => handleDownloadPlaceholder('10th Mark Sheet', studentDetails.full_name)}
-                                  disabled={!record.marksheetIssued}
-                                  className="text-[10px] font-extrabold text-blue-600 disabled:text-slate-300 disabled:cursor-not-allowed hover:underline flex items-center gap-1"
+                            ) : (
+                              <Badge className="bg-slate-100 text-slate-500 border-slate-200 rounded-full px-2.5 py-0.5 text-[10px] w-fit mx-auto border font-bold">
+                                Not Issued
+                              </Badge>
+                            )
+                          ) : (
+                            <span className="text-slate-400 italic text-[10px]">-</span>
+                          )}
+                        </td>
+
+                        {/* 9. Actions */}
+                        <td className="px-5 py-4 text-right">
+                          <div className="flex flex-col gap-1.5 items-end">
+                            <div className="flex gap-1.5">
+                              {/* T.C. Action Trigger */}
+                              {!record.tcIssued ? (
+                                <Button
+                                  onClick={() => openDocModal(record)}
+                                  size="sm"
+                                  className="h-8 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] px-3 font-bold shadow-sm"
                                 >
-                                  <Download className="h-2.5 w-2.5" /> Marksheet
-                                </button>
-                                <button 
-                                  onClick={() => handleDownloadPlaceholder('Class 10 T.C.', studentDetails.full_name)}
-                                  disabled={!record.tcIssued}
-                                  className="text-[10px] font-extrabold text-emerald-600 disabled:text-slate-300 disabled:cursor-not-allowed hover:underline flex items-center gap-1"
+                                  Issue T.C.
+                                </Button>
+                              ) : (
+                                <Button
+                                  onClick={() => handleDownloadPlaceholder('Transfer Certificate', studentDetails.full_name)}
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 border-slate-200 bg-white text-slate-600 hover:text-blue-600 text-[10px] px-3 font-bold shadow-xs flex items-center gap-1"
                                 >
-                                  <Download className="h-2.5 w-2.5" /> T.C.
-                                </button>
-                              </div>
-                            </td>
-                          </>
-                        )}
+                                  <Download className="h-3 w-3" /> Download T.C.
+                                </Button>
+                              )}
 
-                        {/* Actions (Common to all tabs) */}
-                        <td className="px-6 py-4 text-right">
-                          <div className="flex justify-end gap-2">
-                            
-                            {/* Document Tracking Action */}
-                            <Button
-                              onClick={() => openDocModal(record)}
-                              size="sm"
-                              variant="outline"
-                              className="rounded-lg h-8 border-slate-200 bg-white text-slate-600 hover:text-blue-600 px-2.5"
-                              title="Update Document & Leaving Status"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-
-                            {/* Collect Dues Action (Active if balance > 0) */}
-                            <Button
-                              onClick={() => openCollectModal(record)}
-                              disabled={isCleared}
-                              size="sm"
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg h-8 px-3 font-bold disabled:bg-slate-100 disabled:text-slate-400"
-                            >
-                              <IndianRupee className="h-3.5 w-3.5 mr-1" />
-                              Collect
-                            </Button>
-
-                            {/* Edit outstanding balance action (Admin/feeInCharge only) */}
-                            {(isAdmin || userRole === 'feeInCharge') && (
+                              {/* Collect Fee Action */}
                               <Button
-                                onClick={() => openEditModal(record)}
+                                onClick={() => openCollectModal(record)}
+                                disabled={isCleared}
                                 size="sm"
-                                variant="outline"
-                                className="rounded-lg h-8 border-slate-200 text-slate-600 hover:text-indigo-600 px-2.5"
-                                title="Edit Fee Balance Breakdown"
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg h-8 text-[10px] px-3 font-bold disabled:bg-slate-100 disabled:text-slate-400 shadow-sm"
                               >
-                                <Pencil className="h-4 w-4" />
+                                Collect Fee
                               </Button>
-                            )}
+                            </div>
+
+                            {/* ERP Sub-Actions */}
+                            <div className="flex gap-2 text-[10px] font-bold text-slate-400 mr-1 mt-0.5">
+                              <button 
+                                onClick={() => openDocModal(record)}
+                                className="hover:text-blue-600 transition-colors flex items-center gap-0.5"
+                                title="Edit Document & leaving Details"
+                              >
+                                <Pencil className="h-2.5 w-2.5" /> Edit Leaving
+                              </button>
+                              <span>•</span>
+                              <button 
+                                onClick={() => navigate(portalPath(userRole, `/students?search=${studentDetails.admission_number}`))}
+                                className="hover:text-blue-600 transition-colors"
+                              >
+                                Profile
+                              </button>
+                              <span>•</span>
+                              <button 
+                                onClick={() => navigate(portalPath(userRole, `/fee-history?search=${studentDetails.admission_number}`))}
+                                className="hover:text-blue-600 transition-colors"
+                              >
+                                History
+                              </button>
+                            </div>
 
                           </div>
                         </td>
@@ -890,10 +806,10 @@ export default function LeftStudents() {
             <DialogHeader>
               <DialogTitle className="text-2xl font-bold flex items-center gap-2">
                 <FileText className="h-6 w-6 opacity-80" />
-                Document & Status Tracker
+                Edit Leaving Details
               </DialogTitle>
               <DialogDescription className="text-blue-100 text-xs">
-                Track and update Transfer Certificates, Marksheets, and leaving reasons.
+                Configure leaving type, Transfer Certificate numbers, and marksheet issuance.
               </DialogDescription>
             </DialogHeader>
           </div>
@@ -910,44 +826,61 @@ export default function LeftStudents() {
                   <span className="font-bold text-slate-700">{selectedRecord.students?.admission_number}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="font-bold text-slate-500">Current Balance:</span>
-                  <span className="font-black text-rose-600">₹{selectedRecord.currentDue.toLocaleString('en-IN')}</span>
+                  <span className="font-bold text-slate-500">Class:</span>
+                  <span className="font-bold text-slate-700">{selectedRecord.students?.classes?.name || 'N/A'}</span>
                 </div>
               </div>
             )}
 
             <div className="space-y-4">
               
+              {/* Leaving Type Selector */}
+              <div className="space-y-2">
+                <label className="font-extrabold text-slate-700">Leaving Type / Classification</label>
+                <Select value={leavingTypeForm} onValueChange={setLeavingTypeForm}>
+                  <SelectTrigger className="h-10 rounded-xl">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="dropout">Dropout</SelectItem>
+                    <SelectItem value="transfer">Transfer</SelectItem>
+                    <SelectItem value="migration">Migration</SelectItem>
+                    <SelectItem value="completed_10th">Class 10 Completed</SelectItem>
+                    <SelectItem value="discontinued">Discontinued</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
               {/* Document Toggles */}
               <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
-                <div className="space-y-2">
-                  <label className="font-extrabold text-slate-600 block">Mark Sheet Status</label>
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="checkbox" 
-                      id="doc-marksheet"
-                      checked={docForm.marksheet_issued}
-                      onChange={(e) => setDocForm({ ...docForm, marksheet_issued: e.target.checked })}
-                      className="h-4 w-4 text-blue-600 border-slate-300 rounded"
-                    />
-                    <label htmlFor="doc-marksheet" className="font-bold text-slate-700 cursor-pointer">
-                      Mark as Issued
-                    </label>
-                  </div>
-                </div>
-
                 <div className="space-y-2">
                   <label className="font-extrabold text-slate-600 block">T.C. Issued Status</label>
                   <div className="flex items-center gap-2">
                     <input 
                       type="checkbox" 
-                      id="doc-tc"
+                      id="doc-tc-issued"
                       checked={docForm.tc_issued}
                       onChange={(e) => setDocForm({ ...docForm, tc_issued: e.target.checked })}
                       className="h-4 w-4 text-emerald-600 border-slate-300 rounded"
                     />
-                    <label htmlFor="doc-tc" className="font-bold text-slate-700 cursor-pointer">
-                      Mark as Issued
+                    <label htmlFor="doc-tc-issued" className="font-bold text-slate-700 cursor-pointer">
+                      TC Issued
+                    </label>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="font-extrabold text-slate-600 block">Mark Sheet Status</label>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="checkbox" 
+                      id="doc-marksheet-issued"
+                      checked={docForm.marksheet_issued}
+                      onChange={(e) => setDocForm({ ...docForm, marksheet_issued: e.target.checked })}
+                      className="h-4 w-4 text-blue-600 border-slate-300 rounded"
+                    />
+                    <label htmlFor="doc-marksheet-issued" className="font-bold text-slate-700 cursor-pointer">
+                      Mark Sheet Issued
                     </label>
                   </div>
                 </div>
@@ -960,13 +893,13 @@ export default function LeftStudents() {
                   <Input
                     value={docForm.tc_number}
                     onChange={(e) => setDocForm({ ...docForm, tc_number: e.target.value })}
-                    placeholder="Enter TC Number (e.g. TC/1004)"
+                    placeholder="Enter TC Number (e.g. TC/2026/104)"
                     className="h-10 rounded-xl"
                   />
                 </div>
               )}
 
-              {/* Leaving Reason (Stored safely in metadata JSON) */}
+              {/* Leaving Remarks */}
               <div className="space-y-2">
                 <label className="font-extrabold text-slate-700">Official Leaving Remarks / Reason</label>
                 <Input
@@ -985,7 +918,7 @@ export default function LeftStudents() {
               Cancel
             </Button>
             <Button onClick={handleUpdateDocuments} disabled={isUpdatingDocs} className="bg-[#002147] hover:bg-[#002147]/90 text-white rounded-xl px-7 font-bold shadow-md">
-              {isUpdatingDocs ? 'Updating...' : 'Save Document Status'}
+              {isUpdatingDocs ? 'Updating...' : 'Save Leaving Details'}
             </Button>
           </DialogFooter>
         </DialogContent>
