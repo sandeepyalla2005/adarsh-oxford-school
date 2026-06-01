@@ -2170,7 +2170,7 @@ async def create_accessory_payment(payment: AccessoryPayment, user=Depends(get_c
         
         # Validate accessory overpayment
         assignment_res = supabase.table("student_accessory_fees")\
-            .select("amount")\
+            .select("fee_amount")\
             .eq("student_id", payment.student_id)\
             .eq("category_id", payment.category_id)\
             .eq("academic_year", academic_year)\
@@ -2179,7 +2179,7 @@ async def create_accessory_payment(payment: AccessoryPayment, user=Depends(get_c
         if not assignment_res.data:
             raise HTTPException(status_code=400, detail="Accessory category is not assigned to this student")
             
-        assigned_fee = float(assignment_res.data[0].get("amount") or 0.0)
+        assigned_fee = float(assignment_res.data[0].get("fee_amount") or 0.0)
         
         payments_res = supabase.table("student_accessory_payments")\
             .select("amount_paid")\
