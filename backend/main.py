@@ -1039,6 +1039,8 @@ async def collect_payment(request: PaymentCollectionRequest, background_tasks: B
         if not res.data:
             raise HTTPException(status_code=500, detail="Failed to record payment")
             
+        clear_all_caches()
+            
         # 4. Fetch student & parent info for notifications
         student_res = admin_client.table("students")\
             .select("full_name, admission_number, father_phone, mother_phone, classes(name)")\
@@ -2033,6 +2035,7 @@ async def create_accessory_payment(payment: AccessoryPayment, user=Depends(get_c
         }
         
         response = supabase.table("student_accessory_payments").insert(payment_data).execute()
+        clear_all_caches()
         return {"status": "success", "receipt_number": receipt_number, "data": response.data}
     except HTTPException:
         raise

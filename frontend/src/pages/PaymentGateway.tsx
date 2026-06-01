@@ -194,7 +194,7 @@ export default function PaymentGateway() {
           academic_year: state.academicYear,
           amount: state.amount || 0,
           method: 'qr_code',
-          term: state.term || 1, // Represents term for course, month for transport
+          term: state.term !== undefined ? state.term : 1, // Represents term for course, month for transport
           receipt_number: receiptNumber
         }),
       });

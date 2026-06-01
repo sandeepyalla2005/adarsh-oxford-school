@@ -210,11 +210,48 @@ export default function CourseFees() {
 
   const openPaymentDialog = (student: StudentFeeData) => {
     setSelectedStudent(student);
-    setPaymentAmount('');
-    setSelectedTerm('1');
+    
+    // Find the first term that has pending balance
+    let defaultTerm = '1';
+    if (student.old_dues - student.oldDuesPaid > 0) {
+      defaultTerm = '0';
+    } else if (student.term1_fee - student.term1Paid > 0) {
+      defaultTerm = '1';
+    } else if (student.term2_fee - student.term2Paid > 0) {
+      defaultTerm = '2';
+    } else if (student.term3_fee - student.term3Paid > 0) {
+      defaultTerm = '3';
+    }
+    
+    setSelectedTerm(defaultTerm);
     setPaymentMethod('cash');
     setPaymentDialogOpen(true);
   };
+
+  // Update prefilled amount when selectedTerm or selectedStudent changes
+  useEffect(() => {
+    if (selectedStudent) {
+      const term = parseInt(selectedTerm);
+      const termFee = term === 1
+        ? selectedStudent.term1_fee
+        : term === 2
+          ? selectedStudent.term2_fee
+          : term === 3
+            ? selectedStudent.term3_fee
+            : selectedStudent.old_dues;
+      const termPaid = term === 1
+        ? selectedStudent.term1Paid
+        : term === 2
+          ? selectedStudent.term2Paid
+          : term === 3
+            ? selectedStudent.term3Paid
+            : selectedStudent.oldDuesPaid;
+      const pending = Math.max(0, termFee - termPaid);
+      setPaymentAmount(pending > 0 ? pending.toString() : '');
+    } else {
+      setPaymentAmount('');
+    }
+  }, [selectedTerm, selectedStudent]);
 
   const handlePayment = async () => {
     if (!selectedStudent || !paymentAmount || !user) return;
@@ -591,9 +628,44 @@ export default function CourseFees() {
             </DialogHeader>
             {selectedStudent && (
               <div className="space-y-6">
-                <div className="rounded-lg bg-muted/50 p-4">
-                  <p className="font-medium">{selectedStudent.full_name}</p>
-                  <p className="text-sm text-muted-foreground">{selectedStudent.classes?.name}</p>
+                <div className="rounded-lg bg-muted/50 p-4 flex justify-between items-center">
+                  <div>
+                    <p className="font-medium">{selectedStudent.full_name}</p>
+                    <p className="text-sm text-muted-foreground">{selectedStudent.classes?.name}</p>
+                  </div>
+                  <Badge variant="outline" className="border-slate-300">
+                    Total Pending: {formatCurrency(selectedStudent.pendingFee)}
+                  </Badge>
+                </div>
+
+                <div className="rounded-lg border bg-card p-4 space-y-3 shadow-inner">
+                  <h4 className="text-xs uppercase font-bold text-slate-500 tracking-wider">Pending Breakdown</h4>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div className="flex justify-between border-b pb-1">
+                      <span className="text-slate-500">Old Due:</span>
+                      <span className={cn("font-semibold", selectedStudent.old_dues - selectedStudent.oldDuesPaid > 0 ? "text-destructive" : "text-slate-400")}>
+                        {formatCurrency(selectedStudent.old_dues - selectedStudent.oldDuesPaid)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between border-b pb-1">
+                      <span className="text-slate-500">Term 1:</span>
+                      <span className={cn("font-semibold", selectedStudent.term1_fee - selectedStudent.term1Paid > 0 ? "text-primary" : "text-slate-400")}>
+                        {formatCurrency(selectedStudent.term1_fee - selectedStudent.term1Paid)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between border-b pb-1">
+                      <span className="text-slate-500">Term 2:</span>
+                      <span className={cn("font-semibold", selectedStudent.term2_fee - selectedStudent.term2Paid > 0 ? "text-secondary" : "text-slate-400")}>
+                        {formatCurrency(selectedStudent.term2_fee - selectedStudent.term2Paid)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between border-b pb-1">
+                      <span className="text-slate-500">Term 3:</span>
+                      <span className={cn("font-semibold", selectedStudent.term3_fee - selectedStudent.term3Paid > 0 ? "text-info" : "text-slate-400")}>
+                        {formatCurrency(selectedStudent.term3_fee - selectedStudent.term3Paid)}
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
