@@ -40,7 +40,7 @@ interface Payment {
   amount_paid: number;
   payment_method: string;
   payment_date: string;
-  fee_type: 'course' | 'books' | 'transport' | 'accessory' | 'accessories';
+  fee_type: 'course' | 'books' | 'transport' | 'accessory' | 'accessories' | 'left_student';
   student_name: string;
   term?: number;
   month?: number;
@@ -105,6 +105,12 @@ export default function FeeHistory() {
         .select('id, receipt_number, amount_paid, payment_method, payment_date, student_id, students(full_name), accessory_categories(name)')
         .order('payment_date', { ascending: false });
 
+      // Fetch left student recovery payments
+      const { data: leftStudentPayments } = await supabase
+        .from('left_student_recovery_payments')
+        .select('id, receipt_number, amount_paid, payment_method, payment_date, left_student_fee_records(students(full_name))')
+        .order('payment_date', { ascending: false });
+
       const allPayments: Payment[] = [
         ...(coursePayments || []).map(p => ({
           id: p.id,
@@ -155,6 +161,16 @@ export default function FeeHistory() {
           student_name: (p.students as any)?.full_name || 'Unknown',
           item_name: (p as any).accessory_categories?.name || 'Accessory Fee',
         })),
+        ...(leftStudentPayments || []).map(p => ({
+          id: p.id,
+          receipt_number: p.receipt_number,
+          amount_paid: Number(p.amount_paid),
+          payment_method: p.payment_method,
+          payment_date: p.payment_date,
+          fee_type: 'left_student' as const,
+          student_name: (p.left_student_fee_records as any)?.students?.full_name || 'Unknown',
+          item_name: 'Dues Recovery',
+        })),
       ].sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime());
 
       setPayments(allPayments);
@@ -200,10 +216,11 @@ export default function FeeHistory() {
       transport: 'bg-success/10 text-success',
       accessories: 'bg-info/10 text-info',
       accessory: 'bg-warning/10 text-warning-foreground',
+      left_student: 'bg-rose-100 text-rose-700 border-rose-200',
     };
     return (
       <Badge variant="outline" className={variants[type] || ''}>
-        {type.charAt(0).toUpperCase() + type.slice(1)}
+        {type === 'left_student' ? 'Exit Recovery' : type.charAt(0).toUpperCase() + type.slice(1)}
       </Badge>
     );
   };
@@ -252,6 +269,9 @@ export default function FeeHistory() {
   const accessoriesIncome = filteredPayments
     .filter(p => p.fee_type === 'accessories')
     .reduce((sum, p) => sum + p.amount_paid, 0);
+  const leftStudentIncome = filteredPayments
+    .filter(p => p.fee_type === 'left_student')
+    .reduce((sum, p) => sum + p.amount_paid, 0);
 
   return (
     <DashboardLayout>
@@ -282,7 +302,7 @@ export default function FeeHistory() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+          className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6"
         >
           <StatCard
             title="Total Income"
@@ -308,6 +328,11 @@ export default function FeeHistory() {
           <StatCard
             title="Accessories Fees"
             value={formatCurrency(accessoriesIncome)}
+            icon={<IndianRupee className="h-6 w-6" />}
+          />
+          <StatCard
+            title="Exit Recovery"
+            value={formatCurrency(leftStudentIncome)}
             icon={<IndianRupee className="h-6 w-6" />}
           />
         </motion.div>
