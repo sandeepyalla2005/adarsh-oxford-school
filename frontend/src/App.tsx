@@ -1,4 +1,4 @@
-import { Component, lazy, Suspense, useEffect } from "react";
+import React, { Component, lazy, Suspense, useEffect } from "react";
 import type { ReactNode } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -25,7 +25,9 @@ const lazyWithRetry = (componentImport: () => Promise<any>) =>
         // Log the error and force refresh
         console.error('Lazy loading failed, forcing refresh...', error);
         window.sessionStorage.setItem('page-has-been-force-refreshed', 'true');
-        return window.location.reload();
+        window.location.reload();
+        // Return a never-resolving promise since the page is reloading
+        return new Promise<never>(() => {});
       }
       // If we already refreshed and it still fails, throw the error
       throw error;
@@ -122,7 +124,7 @@ const FEE_AUTH_ROLES = ["feeInCharge"] as const;
 
 type PortalRouteDef = {
   path: string;
-  element: JSX.Element;
+  element: React.ReactElement;
   portals: PortalType[];
 };
 
@@ -215,8 +217,19 @@ function ProtectedRoute({
 
 const PortalRedirect = ({ path }: { path: string }) => {
   const { userRole, isLoading } = useAuth();
+  const [timedOut, setTimedOut] = React.useState(false);
+
+  React.useEffect(() => {
+    // If auth is still loading after 5s, stop spinning and redirect to root
+    if (isLoading) {
+      const t = setTimeout(() => setTimedOut(true), 5000);
+      return () => clearTimeout(t);
+    }
+  }, [isLoading]);
+
   // Wait for auth to finish before redirecting to prevent race conditions
-  if (isLoading || !userRole) return <RouteLoader />;
+  if ((isLoading || !userRole) && !timedOut) return <RouteLoader />;
+  if (!userRole) return <Navigate to="/" replace />;
   return <Navigate to={`/${getPortalFromRole(userRole)}${path.startsWith('/') ? path : '/' + path}`} replace />;
 };
 

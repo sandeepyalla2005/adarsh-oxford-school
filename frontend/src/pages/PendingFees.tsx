@@ -7,8 +7,6 @@ import {
   Phone,
   Printer,
   Download,
-  FileText,
-  FileSpreadsheet,
   BookOpen,
   Bus,
   ShoppingCart,
@@ -73,6 +71,7 @@ export default function PendingFees() {
 
   useEffect(() => {
     fetchPendingData();
+    setCurrentPage(1); // Reset pagination when filters change
   }, [activeTab, selectedClass]);
 
   const fetchClasses = async () => {
@@ -196,7 +195,11 @@ export default function PendingFees() {
         const transportPending = pendingMonths.length * monthlyFee;
 
         const accessoriesPaid = accessoriesPaymentMap.get(student.id) || 0;
-        const accessoriesPending = student.has_accessories ? Math.max(0, (student.accessories_fee || 0) - accessoriesPaid) : 0;
+        // NOTE: Accessories pending cannot be computed per-student as there is no
+        // "expected accessories fee" field on the student record. The accessoriesPending
+        // value reflects only payments already tracked via student_accessory_payments.
+        // A full implementation would require a per-category fee ceiling from accessory_categories.
+        const accessoriesPending = 0;
 
         const totalPending = coursePending + booksPending + transportPending + accessoriesPending;
         const termFeePending = term1Pending + term2Pending + term3Pending;
@@ -289,6 +292,11 @@ export default function PendingFees() {
     return matchesSearch && matchesClass && matchesCategory;
   });
 
+  // Also reset page when search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
+
   const totalPages = Math.ceil(filteredStudents.length / itemsPerPage);
   const paginatedStudents = filteredStudents.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
@@ -366,19 +374,11 @@ export default function PendingFees() {
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" onClick={handlePrint} size="sm">
               <Printer className="mr-2 h-4 w-4" />
-              Print All
-            </Button>
-            <Button variant="outline" onClick={handlePrint} size="sm">
-              <Printer className="mr-2 h-4 w-4" />
-              Print Class Wise
-            </Button>
-            <Button variant="outline" onClick={handlePrint} size="sm">
-              <FileText className="mr-2 h-4 w-4" />
-              Export PDF
+              Print
             </Button>
             <Button variant="outline" onClick={handleExportCSV} size="sm">
               <Download className="mr-2 h-4 w-4" />
-              Export Excel
+              Export CSV
             </Button>
           </div>
         </motion.div>

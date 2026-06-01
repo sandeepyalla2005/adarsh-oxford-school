@@ -615,7 +615,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       clearInterval(checkInterval);
     };
-  }, [user, userRole]);
+  }, [user, userRole, signOut]);
 
   return (
     <AuthContext.Provider value={{

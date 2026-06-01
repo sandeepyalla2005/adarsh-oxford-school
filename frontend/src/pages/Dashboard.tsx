@@ -135,18 +135,34 @@ export default function Dashboard() {
         const todayIncome = Number(data.todayIncome) || 0;
         const weeklyIncome = Number(data.weeklyIncome) || 0;
         const monthlyIncome = Number(data.monthlyIncome) || 0;
-        const pendingFees = Number(data.pendingFees) || 0;
 
-        setStats(prev => ({
-          ...prev,
+        setStats({
           totalStudents,
           newStudents,
           oldStudents,
           todayIncome,
           weeklyIncome,
           monthlyIncome,
-          pendingCourse: pendingFees, // Combined pending
-        }));
+          pendingCourse:    Number(data.pendingCourse)    || 0,
+          pendingBooks:     Number(data.pendingBooks)     || 0,
+          pendingTransport: Number(data.pendingTransport) || 0,
+          pendingAccessories: 0, // Not tracked per-student yet
+          // Per-category today
+          todayCourse:     Number(data.todayCourse)      || 0,
+          todayBooks:      Number(data.todayBooks)       || 0,
+          todayTransport:  Number(data.todayTransport)   || 0,
+          todayAccessories:Number(data.todayAccessories) || 0,
+          // Per-category week
+          weeklyCourse:    Number(data.weeklyCourse)     || 0,
+          weeklyBooks:     Number(data.weeklyBooks)      || 0,
+          weeklyTransport: Number(data.weeklyTransport)  || 0,
+          weeklyAccessories:Number(data.weeklyAccessories)||0,
+          // Per-category month
+          monthlyCourse:   Number(data.monthlyCourse)    || 0,
+          monthlyBooks:    Number(data.monthlyBooks)     || 0,
+          monthlyTransport:Number(data.monthlyTransport) || 0,
+          monthlyAccessories:Number(data.monthlyAccessories)||0,
+        });
 
         if (data.monthlyChartData) {
           setMonthlyData(data.monthlyChartData);
@@ -244,10 +260,10 @@ export default function Dashboard() {
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value);
 
-  // Academic year start — used to cap unbounded payment queries
+  // Academic year start — Indian academic year starts April 1 (month index 3)
   const academicYearStart = (() => {
     const now = new Date();
-    return new Date(now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1, 5, 1);
+    return new Date(now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1, 3, 1);
   })();
 
   const pendingData = [

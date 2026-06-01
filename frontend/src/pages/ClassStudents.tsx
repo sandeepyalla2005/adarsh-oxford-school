@@ -206,8 +206,8 @@ export default function ClassStudents() {
 
     useEffect(() => {
         setIsLoading(true);
-        fetchClasses();
-        fetchStudents();
+        // Await both in sequence so loading state is cleared only after both complete
+        fetchClasses().then(() => fetchStudents()).catch(() => setIsLoading(false));
     }, [className]);
 
     const fetchClasses = async () => {
@@ -337,8 +337,9 @@ export default function ClassStudents() {
     const getAddress = (student: Student) => student.address || '-';
     const getAcademicYearStart = () => {
         const now = new Date();
-        const year = now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1;
-        return new Date(year, 5, 1);
+    // Indian academic year starts April 1 (month index 3)
+    const year = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    return new Date(year, 3, 1);
     };
 
     const formatDateSafe = (dateStr: string | undefined | null, formatStr: string = 'dd MMM yyyy') => {

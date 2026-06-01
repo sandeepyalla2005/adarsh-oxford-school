@@ -1,8 +1,9 @@
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import hmac
@@ -116,9 +117,6 @@ def get_admin_client() -> Client:
             detail="Password reset is unavailable until SUPABASE_SERVICE_ROLE_KEY is configured.",
         )
     return admin_supabase
-from fastapi import Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-
 auth_scheme = HTTPBearer()
 
 async def get_current_user(token: HTTPAuthorizationCredentials = Depends(auth_scheme)):
@@ -169,7 +167,7 @@ async def get_current_user(token: HTTPAuthorizationCredentials = Depends(auth_sc
 
 
 def get_current_academic_year(reference_date: Optional[datetime] = None) -> str:
-    current = reference_date or datetime.now()
+    current = reference_date or datetime.now(timezone.utc)
     start_year = current.year if current.month >= 4 else current.year - 1
     end_year_suffix = str((start_year + 1) % 100).zfill(2)
     return f"{start_year}-{end_year_suffix}"
@@ -639,128 +637,204 @@ def refresh_dashboard_stats_task():
                 logger.error(f"Error in count_students: {e}")
                 return 0
 
-        def get_income_stats(days: int | None = None) -> float:
-            tables = ["course_payments", "books_payments", "transport_payments", "accessory_sales", "student_accessory_payments", "accessory_transactions"]
-            since_date = None
-            if days is not None:
-                since_date = (datetime.now() - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
-            
-            def fetch_table_total(table):
-                try:
-                    amount_col = "amount_paid"
-                    if table == "accessory_sales": amount_col = "total_amount"
-                    
-                    query = client.table(table).select(amount_col)
-                    if since_date:
-                        query = query.gte("created_at", since_date.isoformat())
-                    
-                    res = query.execute()
-                    if res.data:
-                        return sum(float(row.get(amount_col, 0)) for row in res.data)
-                    return 0.0
-                except Exception as e:
-                    logger.error(f"Error fetching {table}: {e}")
-                    return 0.0
+        def _start_of_today_utc() -> datetime:
+            """Returns the start of today in UTC (midnight)."""
+            now = datetime.now(timezone.utc)
+            return now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-            with ThreadPoolExecutor(max_workers=6) as exec:
-                results = list(exec.map(fetch_table_total, tables))
-            
-            return sum(results)
+        def _since_date(days: int | None) -> datetime | None:
+            """Convert a days-ago value to a UTC datetime floor.
+            days=0  → start of today (midnight UTC)
+            days=7  → 7 days ago at midnight UTC
+            days=30 → 30 days ago at midnight UTC
+            None    → no date filter (all-time)
+            """
+            if days is None:
+                return None
+            today_start = _start_of_today_utc()
+            return today_start - timedelta(days=days)
 
-        def get_expected_fees() -> float:
+        def fetch_table_income(table: str, since: datetime | None) -> float:
+            """Fetch total income from one payment table, optionally from a date."""
             try:
-                res = client.table("students").select("term1_fee, term2_fee, term3_fee, old_dues, books_fee, transport_fee").eq("is_active", True).execute()
-                total = 0.0
-                for s in res.data:
-                    total += float(s.get("term1_fee") or 0)
-                    total += float(s.get("term2_fee") or 0)
-                    total += float(s.get("term3_fee") or 0)
-                    total += float(s.get("old_dues") or 0)
-                    total += float(s.get("books_fee") or 0)
-                    total += float(s.get("transport_fee") or 0)
-                return total
+                amount_col = "total_amount" if table == "accessory_sales" else "amount_paid"
+                query = client.table(table).select(amount_col)
+                if since:
+                    query = query.gte("created_at", since.isoformat())
+                res = query.execute()
+                if res.data:
+                    return sum(float(row.get(amount_col) or 0) for row in res.data)
+                return 0.0
             except Exception as e:
-                logger.error(f"Error in get_expected_fees: {e}")
+                logger.error(f"Error fetching {table}: {e}")
                 return 0.0
 
+        # Per-category table mapping
+        CATEGORY_TABLES = {
+            "course":    ["course_payments"],
+            "books":     ["books_payments"],
+            "transport": ["transport_payments"],
+            "accessory": ["accessory_sales", "student_accessory_payments", "accessory_transactions"],
+        }
+        ALL_TABLES = [t for tables in CATEGORY_TABLES.values() for t in tables]
+
+        def get_category_income(category: str, since: datetime | None) -> float:
+            return sum(fetch_table_income(t, since) for t in CATEGORY_TABLES[category])
+
+        def get_total_income(since: datetime | None) -> float:
+            return sum(fetch_table_income(t, since) for t in ALL_TABLES)
+
+        def get_expected_fees() -> tuple[float, float, float, float]:
+            """Returns (course_expected, books_expected, transport_expected, all_expected)."""
+            try:
+                res = client.table("students").select(
+                    "term1_fee, term2_fee, term3_fee, old_dues, has_books, books_fee, has_transport, transport_fee"
+                ).eq("is_active", True).execute()
+                course_total = books_total = transport_total = 0.0
+                for s in (res.data or []):
+                    course_total += (
+                        float(s.get("term1_fee") or 0)
+                        + float(s.get("term2_fee") or 0)
+                        + float(s.get("term3_fee") or 0)
+                        + float(s.get("old_dues") or 0)
+                    )
+                    if s.get("has_books"):
+                        books_total += float(s.get("books_fee") or 0)
+                    if s.get("has_transport"):
+                        transport_total += float(s.get("transport_fee") or 0)
+                return course_total, books_total, transport_total, course_total + books_total + transport_total
+            except Exception as e:
+                logger.error(f"Error in get_expected_fees: {e}")
+                return 0.0, 0.0, 0.0, 0.0
+
+        def get_category_collected(category: str) -> float:
+            return get_category_income(category, None)  # all-time
+
         def get_monthly_income_data() -> list[dict[str, Any]]:
-            months = []
-            now = datetime.now()
-            start_date = (now - timedelta(days=5*30)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            
-            tables = ["course_payments", "books_payments", "transport_payments", "accessory_sales", "student_accessory_payments", "accessory_transactions"]
-            
-            # Fetch all data once per table for the 6 month window
-            all_data = []
-            for table in tables:
+            now = datetime.now(timezone.utc)
+            # 6 months window
+            start_date = (now - timedelta(days=5 * 30)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+            # Fetch all data in one pass per table
+            all_data: list[dict] = []
+            for table in ALL_TABLES:
                 try:
-                    amount_col = "amount_paid"
-                    if table == "accessory_sales": amount_col = "total_amount"
-                    
-                    query = client.table(table).select(f"created_at, {amount_col}").gte("created_at", start_date.isoformat())
-                    res = query.execute()
-                    if res.data:
-                        for row in res.data:
-                            try:
-                                dt = datetime.fromisoformat(row["created_at"].replace('Z', '+00:00'))
-                                all_data.append({
-                                    "date": dt,
-                                    "amount": float(row.get(amount_col) or 0)
-                                })
-                            except (ValueError, TypeError):
-                                pass
+                    amount_col = "total_amount" if table == "accessory_sales" else "amount_paid"
+                    res = client.table(table).select(f"created_at, {amount_col}").gte("created_at", start_date.isoformat()).execute()
+                    for row in (res.data or []):
+                        try:
+                            dt = datetime.fromisoformat(row["created_at"].replace('Z', '+00:00'))
+                            # Ensure timezone-aware
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=timezone.utc)
+                            all_data.append({"date": dt, "amount": float(row.get(amount_col) or 0)})
+                        except (ValueError, TypeError):
+                            pass
                 except Exception as e:
                     logger.error(f"Error fetching {table} for monthly stats: {e}")
-                    
-            # Bucket in Python
+
+            months = []
             for i in range(5, -1, -1):
-                start_of_month = (now - timedelta(days=i*30)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                end_of_month = (start_of_month + timedelta(days=32)).replace(day=1) - timedelta(seconds=1)
-                
-                # We need timezone aware comparisons
-                start_aware = start_of_month.astimezone() if start_of_month.tzinfo is None else start_of_month
-                end_aware = end_of_month.astimezone() if end_of_month.tzinfo is None else end_of_month
-                
-                income = sum(item["amount"] for item in all_data if start_aware <= item["date"].astimezone() <= end_aware)
-                
-                month_name = start_of_month.strftime("%b")
+                start_of_month = (now - timedelta(days=i * 30)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                # Move to actual month end
+                if start_of_month.month == 12:
+                    end_of_month = start_of_month.replace(year=start_of_month.year + 1, month=1, day=1) - timedelta(seconds=1)
+                else:
+                    end_of_month = start_of_month.replace(month=start_of_month.month + 1, day=1) - timedelta(seconds=1)
+
+                income = sum(
+                    item["amount"] for item in all_data
+                    if start_of_month <= item["date"] <= end_of_month
+                )
                 months.append({
-                    "name": month_name,
+                    "name": start_of_month.strftime("%b"),
                     "amount": income,
                     "displayLabel": f"₹{int(income/1000)}k" if income >= 1000 else f"₹{int(income)}",
                     "amountFormatted": f"₹{income:,.0f}"
                 })
             return months
 
-        with ThreadPoolExecutor(max_workers=6) as executor:
-            total_future = executor.submit(count_students)
-            new_future = executor.submit(count_students, {"student_type": "new"})
-            today_income_future = executor.submit(get_income_stats, 0)
-            weekly_income_future = executor.submit(get_income_stats, 7)
-            monthly_income_future = executor.submit(get_income_stats, 30)
-            total_income_future = executor.submit(get_income_stats)
-            expected_fees_future = executor.submit(get_expected_fees)
-            monthly_data_future = executor.submit(get_monthly_income_data)
-            
-            total_count = total_future.result()
-            new_count = new_future.result()
-            today_income = today_income_future.result()
-            weekly_income = weekly_income_future.result()
-            monthly_income = monthly_income_future.result()
-            total_collected = total_income_future.result()
-            expected_total = expected_fees_future.result()
-            monthly_chart_data = monthly_data_future.result()
+        # --- Parallel data fetching ---
+        today_since   = _since_date(0)    # start of today UTC
+        week_since    = _since_date(7)    # 7 days ago
+        month_since   = _since_date(30)   # 30 days ago
+
+        with ThreadPoolExecutor(max_workers=12) as executor:
+            f_total         = executor.submit(count_students)
+            f_new           = executor.submit(count_students, {"student_type": "new"})
+            f_today         = executor.submit(get_total_income, today_since)
+            f_week          = executor.submit(get_total_income, week_since)
+            f_month         = executor.submit(get_total_income, month_since)
+            f_expected      = executor.submit(get_expected_fees)
+            f_monthly_chart = executor.submit(get_monthly_income_data)
+            # Per-category collected (all-time) for pending calculation
+            f_course_col    = executor.submit(get_category_collected, "course")
+            f_books_col     = executor.submit(get_category_collected, "books")
+            f_transport_col = executor.submit(get_category_collected, "transport")
+            # Per-category income for today/week/month cards
+            f_today_course  = executor.submit(get_category_income, "course",    today_since)
+            f_today_books   = executor.submit(get_category_income, "books",     today_since)
+            f_today_trans   = executor.submit(get_category_income, "transport", today_since)
+            f_today_acc     = executor.submit(get_category_income, "accessory", today_since)
+            f_week_course   = executor.submit(get_category_income, "course",    week_since)
+            f_week_books    = executor.submit(get_category_income, "books",     week_since)
+            f_week_trans    = executor.submit(get_category_income, "transport", week_since)
+            f_week_acc      = executor.submit(get_category_income, "accessory", week_since)
+            f_month_course  = executor.submit(get_category_income, "course",    month_since)
+            f_month_books   = executor.submit(get_category_income, "books",     month_since)
+            f_month_trans   = executor.submit(get_category_income, "transport", month_since)
+            f_month_acc     = executor.submit(get_category_income, "accessory", month_since)
+
+            total_count       = f_total.result()
+            new_count         = f_new.result()
+            today_income      = f_today.result()
+            weekly_income     = f_week.result()
+            monthly_income    = f_month.result()
+            monthly_chart_data = f_monthly_chart.result()
+            exp_course, exp_books, exp_transport, exp_total = f_expected.result()
+            col_course    = f_course_col.result()
+            col_books     = f_books_col.result()
+            col_transport = f_transport_col.result()
+            today_course  = f_today_course.result()
+            today_books   = f_today_books.result()
+            today_trans   = f_today_trans.result()
+            today_acc     = f_today_acc.result()
+            week_course   = f_week_course.result()
+            week_books    = f_week_books.result()
+            week_trans    = f_week_trans.result()
+            week_acc      = f_week_acc.result()
+            month_course  = f_month_course.result()
+            month_books   = f_month_books.result()
+            month_trans   = f_month_trans.result()
+            month_acc     = f_month_acc.result()
 
         result = {
-            "totalStudents": total_count,
-            "newStudents": new_count,
-            "oldStudents": max(total_count - new_count, 0),
-            "todayIncome": today_income,
-            "weeklyIncome": weekly_income,
-            "monthlyIncome": monthly_income,
-            "pendingFees": max(expected_total - total_collected, 0),
+            "totalStudents":  total_count,
+            "newStudents":    new_count,
+            "oldStudents":    max(total_count - new_count, 0),
+            "todayIncome":    today_income,
+            "weeklyIncome":   weekly_income,
+            "monthlyIncome":  monthly_income,
+            # Per-category pending (expected - collected, floor 0)
+            "pendingCourse":    max(exp_course    - col_course,    0),
+            "pendingBooks":     max(exp_books     - col_books,     0),
+            "pendingTransport": max(exp_transport - col_transport, 0),
+            "pendingFees":      max(exp_total     - col_course - col_books - col_transport, 0),
+            # Per-category income splits for dashboard cards
+            "todayCourse":     today_course,
+            "todayBooks":      today_books,
+            "todayTransport":  today_trans,
+            "todayAccessories":today_acc,
+            "weeklyCourse":    week_course,
+            "weeklyBooks":     week_books,
+            "weeklyTransport": week_trans,
+            "weeklyAccessories":week_acc,
+            "monthlyCourse":   month_course,
+            "monthlyBooks":    month_books,
+            "monthlyTransport":month_trans,
+            "monthlyAccessories":month_acc,
             "monthlyChartData": monthly_chart_data,
-            "lastUpdated": datetime.now().isoformat()
+            "lastUpdated": datetime.now(timezone.utc).isoformat()
         }
         cache_set("dashboard:stats", result, STATS_CACHE_TTL_SECONDS)
         save_stats_to_disk(result)
@@ -787,12 +861,15 @@ def get_dashboard_stats(background_tasks: BackgroundTasks, user=Depends(get_curr
 
         # 3. If we have a cached result (from memory or disk):
         if cached is not None:
-            # Check if the data is stale (e.g. older than 5 minutes)
+            # Check if the data is stale (older than STATS_CACHE_TTL_SECONDS)
             try:
                 last_updated_str = cached.get("lastUpdated")
                 if last_updated_str:
                     last_updated = datetime.fromisoformat(last_updated_str)
-                    is_stale = (datetime.now() - last_updated).total_seconds() > STATS_CACHE_TTL_SECONDS
+                    # Make timezone-aware if naive
+                    if last_updated.tzinfo is None:
+                        last_updated = last_updated.replace(tzinfo=timezone.utc)
+                    is_stale = (datetime.now(timezone.utc) - last_updated).total_seconds() > STATS_CACHE_TTL_SECONDS
                 else:
                     is_stale = True
             except Exception:
@@ -804,7 +881,10 @@ def get_dashboard_stats(background_tasks: BackgroundTasks, user=Depends(get_curr
             
             return cached
 
-        # 4. Fallback if absolutely no cache exists (e.g., first run ever)
+        # 4. No cache exists at all — trigger a SYNCHRONOUS first fetch so the client
+        #    gets real data rather than all-zeros on first load
+        logger.info("No stats cache found. Running synchronous stats refresh for first load...")
+        background_tasks.add_task(refresh_dashboard_stats_task)
         default_stats = {
             "totalStudents": 0,
             "newStudents": 0,
@@ -812,12 +892,16 @@ def get_dashboard_stats(background_tasks: BackgroundTasks, user=Depends(get_curr
             "todayIncome": 0.0,
             "weeklyIncome": 0.0,
             "monthlyIncome": 0.0,
+            "pendingCourse": 0.0,
+            "pendingBooks": 0.0,
+            "pendingTransport": 0.0,
             "pendingFees": 0.0,
+            "todayCourse": 0.0, "todayBooks": 0.0, "todayTransport": 0.0, "todayAccessories": 0.0,
+            "weeklyCourse": 0.0, "weeklyBooks": 0.0, "weeklyTransport": 0.0, "weeklyAccessories": 0.0,
+            "monthlyCourse": 0.0, "monthlyBooks": 0.0, "monthlyTransport": 0.0, "monthlyAccessories": 0.0,
             "monthlyChartData": [],
-            "lastUpdated": datetime.now().isoformat()
+            "lastUpdated": datetime.now(timezone.utc).isoformat()
         }
-        logger.info("No stats cache found. Triggering background refresh and returning default stats.")
-        background_tasks.add_task(refresh_dashboard_stats_task)
         return default_stats
     except Exception as e:
         logger.error(f"Dashboard stats error: {str(e)}", exc_info=True)
@@ -1025,7 +1109,7 @@ async def create_student_api(student: StudentCreateUpdateRequest, user=Depends(g
                 detail=f"Admission Number '{student.admission_number}' already exists in the selected class."
             )
             
-        student_dict = student.dict()
+        student_dict = student.model_dump() if hasattr(student, 'model_dump') else student.dict()
         if not student_dict.get("joining_date"):
             student_dict["joining_date"] = datetime.now().date().isoformat()
             
@@ -1064,7 +1148,7 @@ async def update_student_api(student_id: str, student: StudentCreateUpdateReques
                 detail=f"Admission Number '{student.admission_number}' already exists for another student in the selected class."
             )
             
-        student_dict = student.dict()
+        student_dict = student.model_dump() if hasattr(student, 'model_dump') else student.dict()
         res = admin_client.table("students").update(student_dict).eq("id", student_id).execute()
         if not res.data:
             raise HTTPException(status_code=404, detail="Student not found or update failed")
@@ -1814,7 +1898,7 @@ async def forgot_password(request: ForgotPasswordRequest):
             "otp_hash": hash_otp(otp, salt),
             "otp_salt": salt,
             "expires_at": expires_at.isoformat(),
-            "plain_otp": otp,
+            "plain_otp": None,  # SECURITY: Never store plaintext OTP in DB; OTP is sent via email only
         }).execute()
 
         if not insert_res.data:
@@ -1929,12 +2013,15 @@ def health_check():
 
 # --- WIPE ALL CONFIRMATION ---
 
+class WipeRequest(BaseModel):
+    operation: Optional[str] = "students"
+
 @app.post("/api/auth/request-wipe")
-async def request_wipe(request: Optional[dict] = None, user=Depends(get_current_user)):
+async def request_wipe(request: Optional[WipeRequest] = None, user=Depends(get_current_user)):
     """Initiates a wipe request and generates an OTP stored in the database."""
     try:
         admin_client = get_admin_client()
-        op_type = (request or {}).get("operation", "students")
+        op_type = (request.operation if request else None) or "students"
         
         otp = f"{secrets.randbelow(900000) + 100000}"
         salt = secrets.token_hex(16)
