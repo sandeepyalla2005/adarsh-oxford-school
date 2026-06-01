@@ -1078,7 +1078,7 @@ async def collect_payment(request: PaymentCollectionRequest, background_tasks: B
                         detail=f"Payment amount {request.amount} exceeds the remaining pending balance of {remaining_due} for books fees."
                     )
         elif request.type == "transport":
-            transport_monthly = float(student_info.get("transport_fee") or 0.0)
+            transport_monthly = float(student_info.get("transport_fee") or 0.0) / 11
             
             # Fetch payments already recorded for this specific month (month value 1-12)
             payments_res = admin_client.table("transport_payments")\

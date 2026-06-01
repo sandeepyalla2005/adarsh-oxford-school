@@ -209,7 +209,7 @@ export default function PendingFees() {
         };
         const elapsedMonths = getElapsedMonths(currentMonth);
         const pendingMonths = elapsedMonths.filter(m => !paidMonths.includes(m));
-        const monthlyFee = student.has_transport ? (student.transport_fee || 0) : 0;
+        const monthlyFee = student.has_transport ? ((student.transport_fee || 0) / 11) : 0;
         const transportPending = pendingMonths.length * monthlyFee;
 
         const accessoriesPaid = accessoriesPaymentMap.get(student.id) || 0;

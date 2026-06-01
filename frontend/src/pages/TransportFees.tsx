@@ -155,8 +155,8 @@ export default function TransportFees() {
       };
 
       const enrichedStudents: StudentTransportFee[] = (studentsData as any[] || []).map(student => {
-        // Use student's own transport_fee column (monthly fee)
-        const monthlyFee = (student as any).has_transport ? Number((student as any).transport_fee) || 0 : 0;
+        // Use student's own transport_fee column divided by 11 for monthly fee
+        const monthlyFee = (student as any).has_transport ? (Number((student as any).transport_fee) || 0) / 11 : 0;
 
         const paidMonths = paymentMap.get(student.id) || [];
         const elapsedMonths = getElapsedMonths(currentMonth);
