@@ -58,7 +58,13 @@ export default function FeeHistory() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterPeriod, setFilterPeriod] = useState('monthly');
-  const [selectedDay, setSelectedDay] = useState('');
+  const [selectedDay, setSelectedDay] = useState(() => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  });
   const [selectedWeek, setSelectedWeek] = useState('1');
   const [selectedMonth, setSelectedMonth] = useState((new Date().getMonth() + 1).toString());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
@@ -213,13 +219,19 @@ export default function FeeHistory() {
 
     if (filterPeriod === 'daily' && selectedDay) {
       // Daily filtering logic
-      matchesPeriod = paymentDate.getDay() === ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].indexOf(selectedDay);
+      const paymentDayStr = payment.payment_date.split('T')[0];
+      matchesPeriod = paymentDayStr === selectedDay;
     } else if (filterPeriod === 'weekly' && selectedWeek) {
       // Weekly filtering logic
       const weekOfMonth = Math.ceil(paymentDate.getDate() / 7);
-      matchesPeriod = weekOfMonth.toString() === selectedWeek;
+      matchesPeriod =
+        weekOfMonth.toString() === selectedWeek &&
+        (paymentDate.getMonth() + 1).toString() === selectedMonth &&
+        paymentDate.getFullYear().toString() === selectedYear;
     } else if (filterPeriod === 'monthly' && selectedMonth) {
-      matchesPeriod = (paymentDate.getMonth() + 1).toString() === selectedMonth;
+      matchesPeriod =
+        (paymentDate.getMonth() + 1).toString() === selectedMonth &&
+        paymentDate.getFullYear().toString() === selectedYear;
     } else if (filterPeriod === 'yearly' && selectedYear) {
       matchesPeriod = paymentDate.getFullYear().toString() === selectedYear;
     }
@@ -326,20 +338,12 @@ export default function FeeHistory() {
               </div>
 
               <TabsContent value="daily" className="mt-0">
-                <Select value={selectedDay} onValueChange={setSelectedDay}>
-                  <SelectTrigger className="w-40">
-                    <SelectValue placeholder="Select day" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="mon">Monday</SelectItem>
-                    <SelectItem value="tue">Tuesday</SelectItem>
-                    <SelectItem value="wed">Wednesday</SelectItem>
-                    <SelectItem value="thu">Thursday</SelectItem>
-                    <SelectItem value="fri">Friday</SelectItem>
-                    <SelectItem value="sat">Saturday</SelectItem>
-                    <SelectItem value="sun">Sunday</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Input
+                  type="date"
+                  value={selectedDay}
+                  onChange={(e) => setSelectedDay(e.target.value)}
+                  className="w-40"
+                />
               </TabsContent>
 
               <TabsContent value="weekly" className="mt-0">

@@ -544,6 +544,7 @@ export default function FeeStructure() {
                       <TableHead className="text-right">Term 3</TableHead>
                       <TableHead className="text-right font-bold text-primary">Total</TableHead>
                       <TableHead className="text-right">Books</TableHead>
+                      <TableHead className="text-right">Transport (Monthly)</TableHead>
                       <TableHead className="text-center">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -570,6 +571,9 @@ export default function FeeStructure() {
                         </TableCell>
                         <TableCell className="text-right font-medium">
                           {formatCurrency(structure.books_fee)}
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          {formatCurrency(structure.transport_monthly_fee || 0)}
                         </TableCell>
                         <TableCell className="text-center">
                           <div className="flex items-center justify-center gap-2">
@@ -639,6 +643,10 @@ export default function FeeStructure() {
                 <div className="space-y-2">
                   <Label htmlFor="books_fee">Books Fee *</Label>
                   <Input type="number" value={formData.books_fee} onChange={(e) => setFormData({ ...formData, books_fee: e.target.value })} required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="transport_monthly_fee">Transport Monthly Fee *</Label>
+                  <Input type="number" value={formData.transport_monthly_fee} onChange={(e) => setFormData({ ...formData, transport_monthly_fee: e.target.value })} required />
                 </div>
               </div>
               <DialogFooter>

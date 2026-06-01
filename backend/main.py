@@ -173,6 +173,62 @@ def get_current_academic_year(reference_date: Optional[datetime] = None) -> str:
     return f"{start_year}-{end_year_suffix}"
 
 
+def get_student_actual_pending_fees(student_id: str, student_data: dict, client: Client) -> dict:
+    """Calculates the actual pending course, books, and transport fees for a student by subtracting paid payments."""
+    try:
+        academic_year = get_current_academic_year()
+        
+        # 1. Fetch course payments for the academic year
+        course_payments = client.table("course_payments").select("amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        total_course_paid = sum(float(p.get("amount_paid") or 0.0) for p in (course_payments.data or []))
+        
+        # 2. Fetch books payments for the academic year
+        books_payments = client.table("books_payments").select("amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        total_books_paid = sum(float(p.get("amount_paid") or 0.0) for p in (books_payments.data or []))
+        
+        # 3. Fetch transport payments for the academic year
+        transport_payments = client.table("transport_payments").select("amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        total_transport_paid = sum(float(p.get("amount_paid") or 0.0) for p in (transport_payments.data or []))
+
+        # Expected course fee
+        t1 = float(student_data.get("term1_fee") or 0.0)
+        t2 = float(student_data.get("term2_fee") or 0.0)
+        t3 = float(student_data.get("term3_fee") or 0.0)
+        old_dues = float(student_data.get("old_dues") or 0.0)
+        expected_course = t1 + t2 + t3 + old_dues
+        pending_course = max(0.0, expected_course - total_course_paid)
+        
+        # Expected books fee
+        expected_books = float(student_data.get("books_fee") or 0.0) if student_data.get("has_books") else 0.0
+        pending_books = max(0.0, expected_books - total_books_paid)
+        
+        # Expected transport fee to date (based on elapsed quarters in April-March cycle)
+        current_month = datetime.now(timezone.utc).month
+        if 4 <= current_month <= 6:
+            elapsed_quarters = 1
+        elif 7 <= current_month <= 9:
+            elapsed_quarters = 2
+        elif 10 <= current_month <= 12:
+            elapsed_quarters = 3
+        else:
+            elapsed_quarters = 4
+            
+        transport_monthly = float(student_data.get("transport_fee") or 0.0)
+        expected_transport = (transport_monthly * 3.0 * elapsed_quarters) if student_data.get("has_transport") else 0.0
+        pending_transport = max(0.0, expected_transport - total_transport_paid)
+        
+        return {
+            "course": pending_course,
+            "books": pending_books,
+            "transport": pending_transport,
+            "total": pending_course + pending_books + pending_transport
+        }
+    except Exception as e:
+        logger.error(f"Error calculating student actual pending fees: {e}")
+        return {"course": 0.0, "books": 0.0, "transport": 0.0, "total": 0.0}
+
+
+
 def normalize_email(email: str) -> str:
     return email.strip().lower()
 
@@ -701,7 +757,7 @@ def refresh_dashboard_stats_task():
                     if s.get("has_books"):
                         books_total += float(s.get("books_fee") or 0)
                     if s.get("has_transport"):
-                        transport_total += float(s.get("transport_fee") or 0)
+                        transport_total += float(s.get("transport_fee") or 0) * 12
                 return course_total, books_total, transport_total, course_total + books_total + transport_total
             except Exception as e:
                 logger.error(f"Error in get_expected_fees: {e}")
@@ -1176,22 +1232,17 @@ async def mark_student_dropout(student_id: str, request: DropoutConfirmRequest, 
             raise HTTPException(status_code=404, detail="Student not found")
             
         student_data = student_res.data
-        t1 = float(student_data.get("term1_fee") or 0.0)
-        t2 = float(student_data.get("term2_fee") or 0.0)
-        t3 = float(student_data.get("term3_fee") or 0.0)
-        books = float(student_data.get("books_fee") or 0.0) if student_data.get("has_books") else 0.0
-        transport = float(student_data.get("transport_fee") or 0.0) if student_data.get("has_transport") else 0.0
-        old_dues = float(student_data.get("old_dues") or 0.0)
-        total_pending = t1 + t2 + t3 + books + transport + old_dues
+        pending_data = get_student_actual_pending_fees(student_id, student_data, admin_client)
+        total_pending = pending_data["total"]
         
         left_record = {
             "student_id": student_id,
             "leaving_status": "dropout",
             "leaving_reason": request.reason,
-            "pending_term_fee": t1 + t2 + t3,
-            "pending_transport_fee": transport,
-            "pending_books_fee": books,
-            "old_due": old_dues,
+            "pending_term_fee": pending_data["course"],
+            "pending_transport_fee": pending_data["transport"],
+            "pending_books_fee": pending_data["books"],
+            "old_due": 0.0,
             "total_pending_amount": total_pending,
             "recovery_status": "UNPAID" if total_pending > 0 else "FULLY_PAID",
             "recovered_amount": 0.0
@@ -1478,22 +1529,17 @@ async def approve_dropout(student_id: str, user=Depends(get_current_user)):
             raise HTTPException(status_code=404, detail="Student not found")
             
         student_data = student_res.data
-        t1 = float(student_data.get("term1_fee") or 0.0)
-        t2 = float(student_data.get("term2_fee") or 0.0)
-        t3 = float(student_data.get("term3_fee") or 0.0)
-        books = float(student_data.get("books_fee") or 0.0) if student_data.get("has_books") else 0.0
-        transport = float(student_data.get("transport_fee") or 0.0) if student_data.get("has_transport") else 0.0
-        old_dues = float(student_data.get("old_dues") or 0.0)
-        total_pending = t1 + t2 + t3 + books + transport + old_dues
+        pending_data = get_student_actual_pending_fees(student_id, student_data, admin_client)
+        total_pending = pending_data["total"]
 
         left_record = {
             "student_id": student_id,
             "leaving_status": "dropout",
             "leaving_reason": "PENDING DROPOUT APPROVED",
-            "pending_term_fee": t1 + t2 + t3,
-            "pending_transport_fee": transport,
-            "pending_books_fee": books,
-            "old_due": old_dues,
+            "pending_term_fee": pending_data["course"],
+            "pending_transport_fee": pending_data["transport"],
+            "pending_books_fee": pending_data["books"],
+            "old_due": 0.0,
             "total_pending_amount": total_pending,
             "recovery_status": "UNPAID" if total_pending > 0 else "FULLY_PAID",
             "recovered_amount": 0.0
@@ -1632,22 +1678,17 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
                     left_records = []
                     
                     for student in students_res.data:
-                        t1 = float(student.get("term1_fee") or 0.0)
-                        t2 = float(student.get("term2_fee") or 0.0)
-                        t3 = float(student.get("term3_fee") or 0.0)
-                        books = float(student.get("books_fee") or 0.0) if student.get("has_books") else 0.0
-                        transport = float(student.get("transport_fee") or 0.0) if student.get("has_transport") else 0.0
-                        old_dues = float(student.get("old_dues") or 0.0)
-                        total_pending = t1 + t2 + t3 + books + transport + old_dues
+                        pending_data = get_student_actual_pending_fees(student["id"], student, admin_client)
+                        total_pending = pending_data["total"]
                         
                         left_records.append({
                             "student_id": student["id"],
                             "leaving_status": "completed_10th",
                             "leaving_reason": "Graduated 10th",
-                            "pending_term_fee": t1 + t2 + t3,
-                            "pending_transport_fee": transport,
-                            "pending_books_fee": books,
-                            "old_due": old_dues,
+                            "pending_term_fee": pending_data["course"],
+                            "pending_transport_fee": pending_data["transport"],
+                            "pending_books_fee": pending_data["books"],
+                            "old_due": 0.0,
                             "total_pending_amount": total_pending,
                             "recovery_status": "UNPAID" if total_pending > 0 else "FULLY_PAID",
                             "recovered_amount": 0.0
@@ -1758,18 +1799,13 @@ async def delete_student(student_id: str, req: DeleteStudentRequest, user=Depend
         admin_client = get_admin_client()
         
         # 1. Fetch student details to verify pending fees
-        student_res = admin_client.table("students").select("full_name, term1_fee, term2_fee, term3_fee, old_dues, books_fee, transport_fee, has_books, has_transport").eq("id", student_id).single().execute()
+        student_res = admin_client.table("students").select("id, full_name, term1_fee, term2_fee, term3_fee, old_dues, books_fee, transport_fee, has_books, has_transport").eq("id", student_id).single().execute()
         if not student_res.data:
             raise HTTPException(status_code=404, detail="Student not found")
             
         student_data = student_res.data
-        t1 = float(student_data.get("term1_fee") or 0.0)
-        t2 = float(student_data.get("term2_fee") or 0.0)
-        t3 = float(student_data.get("term3_fee") or 0.0)
-        books = float(student_data.get("books_fee") or 0.0) if student_data.get("has_books") else 0.0
-        transport = float(student_data.get("transport_fee") or 0.0) if student_data.get("has_transport") else 0.0
-        old_dues = float(student_data.get("old_dues") or 0.0)
-        total_pending = t1 + t2 + t3 + books + transport + old_dues
+        pending_data = get_student_actual_pending_fees(student_id, student_data, admin_client)
+        total_pending = pending_data["total"]
 
         if total_pending > 0:
             raise HTTPException(status_code=400, detail=f"Cannot delete student with pending fees (₹{total_pending:,.2f}). Please clear or waive outstanding dues first!")

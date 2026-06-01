@@ -98,7 +98,11 @@ export default function FeeAnalytics() {
 
       return Array.from({ length: 12 }, (_, i) => {
         const m = i + 1;
-        const inMonth = (d: string) => new Date(d).getMonth() + 1 === m;
+        const inMonth = (d: string) => {
+          if (!d) return false;
+          const parts = d.split('-');
+          return parts.length > 1 && parseInt(parts[1], 10) === m;
+        };
 
         const course    = (courseRes.data    || []).filter((r: any) => inMonth(r.payment_date)).reduce((s: number, r: any) => s + Number(r.amount_paid),  0);
         const books     = (booksRes.data     || []).filter((r: any) => inMonth(r.payment_date)).reduce((s: number, r: any) => s + Number(r.amount_paid),  0);

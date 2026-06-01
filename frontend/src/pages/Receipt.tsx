@@ -160,7 +160,7 @@ export default function Receipt() {
                     method: p.payment_method,
                     date: p.payment_date,
                     type: 'transport',
-                    details: p.month ? new Date(0, p.month - 1).toLocaleString('default', { month: 'short' }) : 'Transport Fee'
+                    details: p.month && { 1: 'Q1 (Apr-Jun)', 2: 'Q2 (Jul-Sep)', 3: 'Q3 (Oct-Dec)', 4: 'Q4 (Jan-Mar)' }[p.month] ? { 1: 'Q1 (Apr-Jun)', 2: 'Q2 (Jul-Sep)', 3: 'Q3 (Oct-Dec)', 4: 'Q4 (Jan-Mar)' }[p.month]! : 'Transport Fee'
                 })),
                 ...(accessorySalesRes.data || []).map(p => ({
                     id: p.id,
@@ -264,7 +264,7 @@ export default function Receipt() {
     const getParticularsName = (type: string | null, data: any) => {
         if (type === 'course') return `Tuition Fee (${data.term === 0 ? 'OLD DUE' : `Term ${data.term}`})`;
         if (type === 'books') return `Books & Accessories Fee`;
-        if (type === 'transport') return `Transport Fee (${data.month ? new Date(0, data.month - 1).toLocaleString('default', { month: 'long' }) : 'Monthly'})`;
+        if (type === 'transport') return `Transport Fee (${data.month && { 1: 'Q1 (Apr-Jun)', 2: 'Q2 (Jul-Sep)', 3: 'Q3 (Oct-Dec)', 4: 'Q4 (Jan-Mar)' }[data.month] ? { 1: 'Q1 (Apr-Jun)', 2: 'Q2 (Jul-Sep)', 3: 'Q3 (Oct-Dec)', 4: 'Q4 (Jan-Mar)' }[data.month] : 'Monthly'})`;
         if (type === 'accessories') return `Accessories: ${data.accessory_categories?.name || 'FEE'}`;
         if (type === 'accessory') return `Accessory: ${data.accessories?.item_name || 'Item'} (${data.quantity || 1} qty)`;
         return 'Tuition Fee';

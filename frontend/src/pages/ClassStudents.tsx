@@ -1034,22 +1034,6 @@ export default function ClassStudents() {
 
     const handleDeleteDropout = async (student: Student, otpOverride?: string) => {
         if (isStaff) return;
-        const t1 = Number(student.term1_fee || 0);
-        const t2 = Number(student.term2_fee || 0);
-        const t3 = Number(student.term3_fee || 0);
-        const books = student.has_books ? Number(student.books_fee || 0) : 0;
-        const transport = student.has_transport ? Number(student.transport_fee || 0) : 0;
-        const oldDues = Number(student.old_dues || 0);
-        const totalPending = t1 + t2 + t3 + books + transport + oldDues;
-
-        if (totalPending > 0) {
-            toast({
-                variant: 'destructive',
-                title: 'Operation Blocked',
-                description: `Cannot delete student with pending fees (₹${totalPending.toLocaleString()}). Please clear or waive outstanding dues first!`,
-            });
-            return;
-        }
 
         const isFeeInCharge = userRole === 'feeInCharge';
 

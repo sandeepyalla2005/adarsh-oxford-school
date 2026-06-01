@@ -101,7 +101,7 @@ export default function PendingFees() {
       
       const { data: studentsData } = await query.order('full_name');
 
-      const [coursePaymentsRes, booksPaymentsRes, transportPaymentsRes, accessoriesPaymentsRes] = await Promise.all([
+      const [coursePaymentsRes, booksPaymentsRes, transportPaymentsRes, accessoriesPaymentsRes, studentAccessoryFeesRes] = await Promise.all([
         supabase
           .from('course_payments')
           .select('student_id, term, amount_paid, payment_date')
@@ -118,12 +118,17 @@ export default function PendingFees() {
           .from('student_accessory_payments')
           .select('student_id, amount_paid, payment_date')
           .eq('academic_year', academicYear),
+        supabase
+          .from('student_accessory_fees')
+          .select('student_id, fee_amount')
+          .eq('academic_year', academicYear),
       ]);
 
       const coursePayments = (coursePaymentsRes.data || []) as any[];
       const booksPayments = (booksPaymentsRes.data || []) as any[];
       const transportPayments = (transportPaymentsRes.data || []) as any[];
       const accessoriesPayments = (accessoriesPaymentsRes.data || []) as any[];
+      const studentAccessoryFees = (studentAccessoryFeesRes.data || []) as any[];
 
       const coursePaymentMap = new Map<string, { term1: number; term2: number; term3: number; oldDues: number }>();
       coursePayments.forEach(p => {
@@ -158,6 +163,13 @@ export default function PendingFees() {
         accessoriesPaymentMap.set(studentId, existing + Number(p.amount_paid));
       });
 
+      const accessoryFeeMap = new Map<string, number>();
+      studentAccessoryFees.forEach(f => {
+        const studentId = f.student_id as string;
+        const existing = accessoryFeeMap.get(studentId) || 0;
+        accessoryFeeMap.set(studentId, existing + Number(f.fee_amount));
+      });
+
       const lastPaymentMap = new Map<string, Date>();
       const updateLastPayment = (studentId: string, dateStr: string) => {
         if (!dateStr) return;
@@ -188,18 +200,21 @@ export default function PendingFees() {
         const booksPaid = booksPaymentMap.get(student.id) || 0;
         const booksPending = student.has_books ? Math.max(0, (student.books_fee || 0) - booksPaid) : 0;
 
-        const paidMonths = transportPaymentMap.get(student.id) || [];
-        const pendingMonths = Array.from({ length: currentMonth }, (_, i) => i + 1)
-          .filter(m => !paidMonths.includes(m));
+        const paidQuarters = transportPaymentMap.get(student.id) || [];
+        const getElapsedQuarters = (month: number): number[] => {
+          if (month >= 4 && month <= 6) return [1];
+          if (month >= 7 && month <= 9) return [1, 2];
+          if (month >= 10 && month <= 12) return [1, 2, 3];
+          return [1, 2, 3, 4];
+        };
+        const elapsedQuarters = getElapsedQuarters(currentMonth);
+        const pendingQuarters = elapsedQuarters.filter(q => !paidQuarters.includes(q));
         const monthlyFee = student.has_transport ? (student.transport_fee || 0) : 0;
-        const transportPending = pendingMonths.length * monthlyFee;
+        const transportPending = pendingQuarters.length * (monthlyFee * 3);
 
         const accessoriesPaid = accessoriesPaymentMap.get(student.id) || 0;
-        // NOTE: Accessories pending cannot be computed per-student as there is no
-        // "expected accessories fee" field on the student record. The accessoriesPending
-        // value reflects only payments already tracked via student_accessory_payments.
-        // A full implementation would require a per-category fee ceiling from accessory_categories.
-        const accessoriesPending = 0;
+        const accessoriesAssigned = accessoryFeeMap.get(student.id) || 0;
+        const accessoriesPending = Math.max(0, accessoriesAssigned - accessoriesPaid);
 
         const totalPending = coursePending + booksPending + transportPending + accessoriesPending;
         const termFeePending = term1Pending + term2Pending + term3Pending;
@@ -216,7 +231,7 @@ export default function PendingFees() {
           booksPending,
           transportPending,
           accessoriesPending,
-          pendingMonths,
+          pendingQuarters,
           totalPending,
           lastPaymentDate: lastPayment ? lastPayment.toISOString() : null,
         };
@@ -315,7 +330,7 @@ export default function PendingFees() {
   };
 
   const handleExportCSV = () => {
-    const headers = ['Student Name', 'Admission No', 'Class', 'Parent Name', 'Parent Mobile', 'Term Fee Pending', 'Old Due', 'Transport Pending', 'Books Pending', 'Total Pending', 'Last Payment', 'Status'];
+    const headers = ['Student Name', 'Admission No', 'Class', 'Parent Name', 'Parent Mobile', 'Term Fee Pending', 'Old Due', 'Transport Pending', 'Books Pending', 'Accessories Pending', 'Total Pending', 'Last Payment', 'Status'];
     const csvContent = [
       headers.join(','),
       ...filteredStudents.map(s => [
@@ -328,6 +343,7 @@ export default function PendingFees() {
         s.oldDuesPending || 0,
         s.transportPending || 0,
         s.booksPending || 0,
+        s.accessoriesPending || 0,
         s.totalPending || 0,
         s.lastPaymentDate ? new Date(s.lastPaymentDate).toLocaleDateString() : '',
         s.lastPaymentDate ? 'Partial Paid' : 'Pending'
@@ -559,6 +575,7 @@ export default function PendingFees() {
                           <TableHead className="text-right">Old Due</TableHead>
                           <TableHead className="text-right">Transport</TableHead>
                           <TableHead className="text-right">Books</TableHead>
+                          <TableHead className="text-right">Accessories</TableHead>
                           <TableHead className="text-right">Total Pending</TableHead>
                           <TableHead>Last Payment</TableHead>
                           <TableHead>Status</TableHead>
@@ -567,13 +584,13 @@ export default function PendingFees() {
                       <TableBody>
                         {isLoading ? (
                           <TableRow>
-                            <TableCell colSpan={14} className="text-center py-12">
+                            <TableCell colSpan={15} className="text-center py-12">
                               <div className="h-8 w-8 mx-auto animate-spin rounded-full border-4 border-primary border-t-transparent" />
                             </TableCell>
                           </TableRow>
                         ) : filteredStudents.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={14} className="text-center py-12 text-muted-foreground">
+                            <TableCell colSpan={15} className="text-center py-12 text-muted-foreground">
                               No pending fees found
                             </TableCell>
                           </TableRow>
@@ -630,6 +647,11 @@ export default function PendingFees() {
                               <TableCell className="text-right">
                                 <span className={cn("font-semibold", student.booksPending > 0 ? "text-destructive" : "text-muted-foreground")}>
                                   {formatCurrency(student.booksPending || 0)}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <span className={cn("font-semibold", student.accessoriesPending > 0 ? "text-destructive" : "text-muted-foreground")}>
+                                  {formatCurrency(student.accessoriesPending || 0)}
                                 </span>
                               </TableCell>
                               <TableCell className="text-right">
