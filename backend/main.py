@@ -2204,8 +2204,7 @@ async def create_accessory_payment(payment: AccessoryPayment, user=Depends(get_c
             "academic_year": get_current_academic_year(),
             "amount_paid": payment.amount_paid,
             "payment_method": payment.payment_method,
-            "receipt_number": receipt_number,
-            "remarks": payment.remarks
+            "receipt_number": receipt_number
         }
         
         response = supabase.table("student_accessory_payments").insert(payment_data).execute()
