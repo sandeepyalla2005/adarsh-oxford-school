@@ -306,6 +306,30 @@ export default function AccessoriesFees() {
         return;
     }
 
+    // Validate no category is overpaid
+    for (const catId of payingCategories) {
+        const catAmount = paymentSelections[catId].amount;
+        const assignedCat = selectedStudentForPayment.assignedCategories.find(ac => ac.category_id === catId);
+        const maxPending = assignedCat ? assignedCat.pending_amount : 0;
+        if (catAmount <= 0) {
+            toast({
+                variant: 'destructive',
+                title: 'Invalid Amount',
+                description: `Payment amount for ${assignedCat?.name || 'Category'} must be greater than zero.`,
+            });
+            return;
+        }
+        if (catAmount > maxPending) {
+            const catName = assignedCat ? assignedCat.name : 'Category';
+            toast({
+                variant: 'destructive',
+                title: 'Overpayment Blocked',
+                description: `Payment amount for ${catName} (${formatCurrency(catAmount)}) cannot exceed the pending amount (${formatCurrency(maxPending)}).`,
+            });
+            return;
+        }
+    }
+
     if (paymentMethod === 'qr_code') {
       setPaymentDialogOpen(false);
       

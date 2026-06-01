@@ -256,6 +256,27 @@ export default function CourseFees() {
   const handlePayment = async () => {
     if (!selectedStudent || !paymentAmount || !user) return;
 
+    const pendingAmount = getPendingTermAmount();
+    const payingAmount = parseFloat(paymentAmount);
+
+    if (payingAmount <= 0) {
+      toast({
+        variant: 'destructive',
+        title: 'Invalid Amount',
+        description: 'Payment amount must be greater than zero.',
+      });
+      return;
+    }
+
+    if (payingAmount > pendingAmount) {
+      toast({
+        variant: 'destructive',
+        title: 'Overpayment Blocked',
+        description: `Payment amount (${formatCurrency(payingAmount)}) cannot exceed the pending amount (${formatCurrency(pendingAmount)}) for this term.`,
+      });
+      return;
+    }
+
     if (paymentMethod === 'qr_code') {
       setPaymentDialogOpen(false);
       navigate('/payment-gateway', {

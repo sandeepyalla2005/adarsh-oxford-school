@@ -208,6 +208,25 @@ export default function TransportFees() {
   const handlePayment = async () => {
     if (!selectedStudent || !paymentAmount || !selectedMonth || !user) return;
 
+    const payingAmount = parseFloat(paymentAmount);
+    if (payingAmount <= 0) {
+      toast({
+        variant: 'destructive',
+        title: 'Invalid Amount',
+        description: 'Payment amount must be greater than zero.',
+      });
+      return;
+    }
+
+    if (payingAmount > selectedStudent.quarterlyFee) {
+      toast({
+        variant: 'destructive',
+        title: 'Overpayment Blocked',
+        description: `Payment amount (${formatCurrency(payingAmount)}) cannot exceed the quarterly fee (${formatCurrency(selectedStudent.quarterlyFee)}).`,
+      });
+      return;
+    }
+
     if (paymentMethod === 'qr_code') {
       setPaymentDialogOpen(false);
       navigate('/payment-gateway', {

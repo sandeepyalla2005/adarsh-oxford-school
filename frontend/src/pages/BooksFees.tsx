@@ -160,13 +160,32 @@ export default function BooksFees() {
 
   const openPaymentDialog = (student: StudentBooksFee) => {
     setSelectedStudent(student);
-    setPaymentAmount('');
+    setPaymentAmount(student.booksPending > 0 ? student.booksPending.toString() : '');
     setPaymentMethod('cash');
     setPaymentDialogOpen(true);
   };
 
   const handlePayment = async () => {
     if (!selectedStudent || !paymentAmount || !user) return;
+
+    const payingAmount = parseFloat(paymentAmount);
+    if (payingAmount <= 0) {
+      toast({
+        variant: 'destructive',
+        title: 'Invalid Amount',
+        description: 'Payment amount must be greater than zero.',
+      });
+      return;
+    }
+
+    if (payingAmount > selectedStudent.booksPending) {
+      toast({
+        variant: 'destructive',
+        title: 'Overpayment Blocked',
+        description: `Payment amount (${formatCurrency(payingAmount)}) cannot exceed the pending amount (${formatCurrency(selectedStudent.booksPending)}) for books.`,
+      });
+      return;
+    }
 
     if (paymentMethod === 'qr_code') {
       setPaymentDialogOpen(false);
