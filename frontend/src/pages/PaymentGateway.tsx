@@ -90,6 +90,23 @@ export default function PaymentGateway() {
   const [isSuccess, setIsSuccess] = useState(false);
   const [generatedReceiptNo, setGeneratedReceiptNo] = useState('');
 
+  // Dynamically resolve amount with fallback tracking
+  const [amount, setAmount] = useState(0);
+
+  useEffect(() => {
+    if (state) {
+      if (state.amount !== undefined) {
+        setAmount(state.amount);
+      } else if (state.paymentType === 'accessories' && state.payingCategories && state.payingCategories.length > 0) {
+        const calculatedTotal = state.payingCategories.reduce((sum, cat) => sum + cat.amount, 0);
+        setAmount(calculatedTotal);
+      } else if (state.paymentType === 'course' && state.payingTerms && state.payingTerms.length > 0) {
+        const calculatedTotal = state.payingTerms.reduce((sum, pt) => sum + pt.amount, 0);
+        setAmount(calculatedTotal);
+      }
+    }
+  }, [state]);
+
   // Protect route & validate state
   useEffect(() => {
     if (!state) {
@@ -199,7 +216,7 @@ export default function PaymentGateway() {
           },
           body: JSON.stringify({
             record_id: state.leftRecordId,
-            amount: state.amount || 0,
+            amount: amount || state.amount || 0,
             method: 'UPI',
             remarks: 'Paid via QR Code Payment Gateway'
           }),
@@ -270,7 +287,7 @@ export default function PaymentGateway() {
             student_id: state.studentId,
             type: state.paymentType,
             academic_year: state.academicYear,
-            amount: state.amount || 0,
+            amount: amount || state.amount || 0,
             method: 'qr_code',
             term: state.term !== undefined ? state.term : 1,
             receipt_number: receiptNumber
@@ -507,7 +524,7 @@ export default function PaymentGateway() {
                       <div className="flex justify-between items-center">
                         <span className="text-sm font-bold text-slate-100 uppercase tracking-wide">Amount Due</span>
                         <span className="text-2xl font-black text-indigo-400 tracking-tight">
-                          {formatCurrency(state.amount || 0)}
+                          {formatCurrency(amount || state.amount || 0)}
                         </span>
                       </div>
                     </div>
@@ -698,7 +715,7 @@ export default function PaymentGateway() {
 
                     <div className="flex justify-between items-center border-t border-slate-900 pt-3">
                       <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Total Amount Paid</span>
-                      <span className="text-xl font-mono font-black text-emerald-400">{formatCurrency(state.amount || 0)}</span>
+                      <span className="text-xl font-mono font-black text-emerald-400">{formatCurrency(amount || state.amount || 0)}</span>
                     </div>
                   </div>
 

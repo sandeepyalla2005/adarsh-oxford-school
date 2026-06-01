@@ -333,6 +333,7 @@ export default function AccessoriesFees() {
     if (paymentMethod === 'qr_code') {
       setPaymentDialogOpen(false);
       
+      const totalAmount = payingCategories.reduce((sum, catId) => sum + paymentSelections[catId].amount, 0);
       const enrichedPayingCats = payingCategories.map(catId => ({
         categoryId: catId,
         amount: paymentSelections[catId].amount,
@@ -344,6 +345,7 @@ export default function AccessoriesFees() {
           studentId: selectedStudentForPayment.id,
           studentName: selectedStudentForPayment.full_name,
           className: selectedStudentForPayment.classes?.name,
+          amount: totalAmount,
           paymentType: 'accessories',
           academicYear: academicYear,
           payingCategories: enrichedPayingCats
