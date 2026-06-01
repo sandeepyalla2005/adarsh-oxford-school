@@ -2587,6 +2587,52 @@ async def collect_left_student_fee(request: LeftStudentCollectionRequest, user=D
         logger.error(f"Error collecting left student fee: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+class LeftStudentUpdateDetailsRequest(BaseModel):
+    record_id: str
+    leaving_reason: str
+    leaving_status: Optional[str] = None
+
+@app.post("/api/left-students/update-details")
+async def update_left_student_details(request: LeftStudentUpdateDetailsRequest, user=Depends(get_current_user)):
+    try:
+        if user.role not in ['admin', 'feeInCharge']:
+            raise HTTPException(status_code=403, detail="Not authorized")
+            
+        admin_client = get_admin_client()
+        
+        # 1. Fetch the record
+        res = admin_client.table("left_student_fee_records").select("*").eq("id", request.record_id).single().execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Left student record not found")
+            
+        # 2. Update the record
+        update_data = {
+            "leaving_reason": request.leaving_reason,
+            "updated_at": datetime.now().isoformat()
+        }
+        if request.leaving_status:
+            update_data["leaving_status"] = request.leaving_status
+            
+        admin_client.table("left_student_fee_records").update(update_data).eq("id", request.record_id).execute()
+        
+        # Also update students table status if leaving_status is provided
+        if request.leaving_status:
+            student_id = res.data["student_id"]
+            admin_client.table("students").update({
+                "status": request.leaving_status,
+                "updated_at": datetime.now().isoformat()
+            }).eq("id", student_id).execute()
+            
+        clear_all_caches()
+        return {"status": "success", "message": "Details updated successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating left student details: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/left-students/dashboard")
 async def get_left_students_dashboard(user=Depends(get_current_user)):
     try:
