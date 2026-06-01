@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -94,8 +95,12 @@ export default function CourseFees() {
   const [selectedClass, setSelectedClass] = useState<string>('all');
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<StudentFeeData | null>(null);
-  const [paymentAmount, setPaymentAmount] = useState('');
-  const [selectedTerm, setSelectedTerm] = useState('1');
+  const [paymentSelections, setPaymentSelections] = useState<Record<string, { paying: boolean; amount: number }>>({
+    '0': { paying: false, amount: 0 },
+    '1': { paying: false, amount: 0 },
+    '2': { paying: false, amount: 0 },
+    '3': { paying: false, amount: 0 }
+  });
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeCategory, setActiveCategory] = useState<'course' | 'books' | 'transport'>('course');
@@ -211,83 +216,142 @@ export default function CourseFees() {
   const openPaymentDialog = (student: StudentFeeData) => {
     setSelectedStudent(student);
     
-    // Find the first term that has pending balance
-    let defaultTerm = '1';
-    if (student.old_dues - student.oldDuesPaid > 0) {
-      defaultTerm = '0';
-    } else if (student.term1_fee - student.term1Paid > 0) {
-      defaultTerm = '1';
-    } else if (student.term2_fee - student.term2Paid > 0) {
-      defaultTerm = '2';
-    } else if (student.term3_fee - student.term3Paid > 0) {
-      defaultTerm = '3';
+    // Find terms and populate paymentSelections
+    const selections: Record<string, { paying: boolean; amount: number }> = {
+      '0': { paying: false, amount: 0 },
+      '1': { paying: false, amount: 0 },
+      '2': { paying: false, amount: 0 },
+      '3': { paying: false, amount: 0 }
+    };
+
+    const oldDuePending = Math.max(0, student.old_dues - student.oldDuesPaid);
+    const term1Pending = Math.max(0, student.term1_fee - student.term1Paid);
+    const term2Pending = Math.max(0, student.term2_fee - student.term2Paid);
+    const term3Pending = Math.max(0, student.term3_fee - student.term3Paid);
+
+    if (oldDuePending > 0) {
+      selections['0'] = { paying: true, amount: oldDuePending };
+    } else if (term1Pending > 0) {
+      selections['1'] = { paying: true, amount: term1Pending };
+    } else if (term2Pending > 0) {
+      selections['2'] = { paying: true, amount: term2Pending };
+    } else if (term3Pending > 0) {
+      selections['3'] = { paying: true, amount: term3Pending };
     }
-    
-    setSelectedTerm(defaultTerm);
+
+    setPaymentSelections(selections);
     setPaymentMethod('cash');
     setPaymentDialogOpen(true);
   };
 
-  // Update prefilled amount when selectedTerm or selectedStudent changes
-  useEffect(() => {
-    if (selectedStudent) {
-      const term = parseInt(selectedTerm);
-      const termFee = term === 1
-        ? selectedStudent.term1_fee
-        : term === 2
-          ? selectedStudent.term2_fee
-          : term === 3
-            ? selectedStudent.term3_fee
-            : selectedStudent.old_dues;
-      const termPaid = term === 1
-        ? selectedStudent.term1Paid
-        : term === 2
-          ? selectedStudent.term2Paid
-          : term === 3
-            ? selectedStudent.term3Paid
-            : selectedStudent.oldDuesPaid;
-      const pending = Math.max(0, termFee - termPaid);
-      setPaymentAmount(pending > 0 ? pending.toString() : '');
-    } else {
-      setPaymentAmount('');
-    }
-  }, [selectedTerm, selectedStudent]);
+  const handleSelectionChange = (termId: string, checked: boolean) => {
+    if (!selectedStudent) return;
+    
+    const pending = getTermPendingAmount(termId);
+    
+    setPaymentSelections(prev => ({
+      ...prev,
+      [termId]: {
+        paying: checked,
+        amount: checked ? pending : 0
+      }
+    }));
+  };
+
+  const handleAmountChange = (termId: string, amount: number) => {
+    setPaymentSelections(prev => ({
+      ...prev,
+      [termId]: {
+        ...prev[termId],
+        amount: amount
+      }
+    }));
+  };
+
+  const getTermPendingAmount = (termId: string) => {
+    if (!selectedStudent) return 0;
+    const term = parseInt(termId);
+    const termFee = term === 1
+      ? selectedStudent.term1_fee
+      : term === 2
+        ? selectedStudent.term2_fee
+        : term === 3
+          ? selectedStudent.term3_fee
+          : selectedStudent.old_dues;
+    const termPaid = term === 1
+      ? selectedStudent.term1Paid
+      : term === 2
+        ? selectedStudent.term2Paid
+        : term === 3
+          ? selectedStudent.term3Paid
+          : selectedStudent.oldDuesPaid;
+    return Math.max(0, termFee - termPaid);
+  };
+
+  const getTermName = (termId: string) => {
+    if (termId === '0') return 'Old Outstanding Dues';
+    return `Term ${termId}`;
+  };
 
   const handlePayment = async () => {
-    if (!selectedStudent || !paymentAmount || !user) return;
+    if (!selectedStudent || !user) return;
 
-    const pendingAmount = getPendingTermAmount();
-    const payingAmount = parseFloat(paymentAmount);
+    // Gather terms being paid
+    const termsToPay = Object.keys(paymentSelections)
+      .filter(termId => paymentSelections[termId].paying && paymentSelections[termId].amount > 0);
 
-    if (payingAmount <= 0) {
+    if (termsToPay.length === 0) {
       toast({
         variant: 'destructive',
-        title: 'Invalid Amount',
-        description: 'Payment amount must be greater than zero.',
+        title: 'Invalid Payment',
+        description: 'Select at least one term to pay for.',
       });
       return;
     }
 
-    if (payingAmount > pendingAmount) {
-      toast({
-        variant: 'destructive',
-        title: 'Overpayment Blocked',
-        description: `Payment amount (${formatCurrency(payingAmount)}) cannot exceed the pending amount (${formatCurrency(pendingAmount)}) for this term.`,
-      });
-      return;
+    // Validate overpayments and non-zero payments
+    for (const termId of termsToPay) {
+      const payingAmount = paymentSelections[termId].amount;
+      const pendingAmount = getTermPendingAmount(termId);
+
+      if (payingAmount <= 0) {
+        toast({
+          variant: 'destructive',
+          title: 'Invalid Amount',
+          description: `Payment amount for ${getTermName(termId)} must be greater than zero.`,
+        });
+        return;
+      }
+
+      if (payingAmount > pendingAmount) {
+        toast({
+          variant: 'destructive',
+          title: 'Overpayment Blocked',
+          description: `Payment amount for ${getTermName(termId)} (${formatCurrency(payingAmount)}) cannot exceed the pending amount (${formatCurrency(pendingAmount)}).`,
+        });
+        return;
+      }
     }
+
+    const totalAmount = termsToPay.reduce((sum, termId) => sum + paymentSelections[termId].amount, 0);
 
     if (paymentMethod === 'qr_code') {
       setPaymentDialogOpen(false);
+      
+      const payingTerms = termsToPay.map(termId => ({
+        term: parseInt(termId),
+        amount: paymentSelections[termId].amount
+      }));
+
       navigate('/payment-gateway', {
         state: {
           studentId: selectedStudent.id,
           studentName: selectedStudent.full_name,
           className: selectedStudent.classes?.name,
-          amount: parseFloat(paymentAmount),
+          amount: totalAmount,
           paymentType: 'course',
-          term: parseInt(selectedTerm),
-          academicYear: academicYear
+          academicYear: academicYear,
+          payingTerms: payingTerms
         }
       });
       return;
@@ -296,28 +360,31 @@ export default function CourseFees() {
     setIsSubmitting(true);
     try {
       const receiptNumber = `RCP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
       const { data: { session } } = await supabase.auth.getSession();
-      const response = await fetch(`${getApiBaseUrl()}/api/payments/collect`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token}`,
-        },
-        body: JSON.stringify({
-          student_id: selectedStudent.id,
-          type: 'course',
-          academic_year: academicYear,
-          amount: parseFloat(paymentAmount),
-          method: paymentMethod,
-          term: parseInt(selectedTerm),
-          receipt_number: receiptNumber,
-        }),
-      });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to record payment');
+      // Process payments sequentially via FastAPI using the same receipt number
+      for (const termId of termsToPay) {
+        const response = await fetch(`${getApiBaseUrl()}/api/payments/collect`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`,
+          },
+          body: JSON.stringify({
+            student_id: selectedStudent.id,
+            type: 'course',
+            academic_year: academicYear,
+            amount: paymentSelections[termId].amount,
+            method: paymentMethod,
+            term: parseInt(termId),
+            receipt_number: receiptNumber,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || 'Failed to record payment');
+        }
       }
 
       toast({
@@ -388,26 +455,6 @@ export default function CourseFees() {
     ).length;
     return acc;
   }, {} as Record<string, number>);
-
-  const getPendingTermAmount = () => {
-    if (!selectedStudent) return 0;
-    const term = parseInt(selectedTerm);
-    const termFee = term === 1
-      ? selectedStudent.term1_fee
-      : term === 2
-        ? selectedStudent.term2_fee
-        : term === 3
-          ? selectedStudent.term3_fee
-          : selectedStudent.old_dues;
-    const termPaid = term === 1
-      ? selectedStudent.term1Paid
-      : term === 2
-        ? selectedStudent.term2Paid
-        : term === 3
-          ? selectedStudent.term3Paid
-          : selectedStudent.oldDuesPaid;
-    return Math.max(0, termFee - termPaid);
-  };
 
   return (
     <DashboardLayout>
@@ -689,33 +736,62 @@ export default function CourseFees() {
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Select Term</Label>
-                  <Select value={selectedTerm} onValueChange={setSelectedTerm}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0">Old Due</SelectItem>
-                      <SelectItem value="1">Term 1</SelectItem>
-                      <SelectItem value="2">Term 2</SelectItem>
-                      <SelectItem value="3">Term 3</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-sm text-muted-foreground">
-                    Pending: {formatCurrency(getPendingTermAmount())}
-                  </p>
+                <div className="space-y-4">
+                  <Label className="font-semibold text-sm">Select Terms & Enter Amounts</Label>
+                  <div className="rounded-lg border bg-card p-3 space-y-3 shadow-inner max-h-[220px] overflow-y-auto">
+                    {['0', '1', '2', '3'].map((termId) => {
+                      const pending = getTermPendingAmount(termId);
+                      const isChecked = paymentSelections[termId]?.paying || false;
+                      const isPaid = pending <= 0;
+                      let displayName = '';
+                      if (termId === '0') displayName = 'Old Outstanding Dues';
+                      else displayName = `Term ${termId} Fee`;
+
+                      return (
+                        <div key={termId} className={cn("flex items-center justify-between gap-4 p-2 rounded-md hover:bg-slate-50 transition-colors", isPaid && "opacity-60")}>
+                          <div className="flex items-center gap-3">
+                            <Checkbox
+                              id={`pay-term-${termId}`}
+                              checked={isChecked}
+                              onCheckedChange={(checked) => handleSelectionChange(termId, !!checked)}
+                              disabled={isPaid}
+                            />
+                            <div className="flex flex-col">
+                              <Label htmlFor={`pay-term-${termId}`} className={cn("text-xs font-semibold cursor-pointer", isPaid && "line-through text-slate-400")}>
+                                {displayName}
+                              </Label>
+                              <span className="text-[10px] text-muted-foreground">
+                                {isPaid ? 'Fully Paid' : `Pending: ${formatCurrency(pending)}`}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="w-[120px]">
+                            <Input
+                              type="number"
+                              value={isChecked ? (paymentSelections[termId]?.amount || '') : ''}
+                              onChange={(e) => handleAmountChange(termId, parseFloat(e.target.value) || 0)}
+                              disabled={!isChecked || isPaid}
+                              placeholder="Amount"
+                              className="h-8 text-right font-medium text-xs"
+                              max={pending}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="amount">Payment Amount</Label>
-                  <Input
-                    id="amount"
-                    type="number"
-                    value={paymentAmount}
-                    onChange={(e) => setPaymentAmount(e.target.value)}
-                    placeholder="Enter amount"
-                  />
+                {/* Total Selected Amount */}
+                <div className="flex justify-between items-center bg-slate-100/80 p-3 rounded-lg border">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-600">Total Payment Amount</span>
+                  <span className="text-lg font-black text-primary">
+                    {formatCurrency(
+                      Object.keys(paymentSelections)
+                        .filter(termId => paymentSelections[termId]?.paying)
+                        .reduce((sum, termId) => sum + (paymentSelections[termId]?.amount || 0), 0)
+                    )}
+                  </span>
                 </div>
 
                 <div className="space-y-3">
@@ -798,7 +874,13 @@ export default function CourseFees() {
                       }
                       handlePayment();
                     }}
-                    disabled={isSubmitting || !paymentAmount || isStaff}
+                    disabled={
+                      isSubmitting ||
+                      Object.keys(paymentSelections)
+                        .filter(termId => paymentSelections[termId]?.paying)
+                        .reduce((sum, termId) => sum + (paymentSelections[termId]?.amount || 0), 0) <= 0 ||
+                      isStaff
+                    }
                   >
                     {isSubmitting ? 'Processing...' : paymentMethod === 'qr_code' ? 'Proceed to QR Pay' : 'Confirm Payment'}
                     {isStaff && (

@@ -50,6 +50,11 @@ interface PayingCategory {
   name: string;
 }
 
+interface PayingTerm {
+  term: number;
+  amount: number;
+}
+
 interface PaymentState {
   studentId: string;
   studentName: string;
@@ -59,6 +64,7 @@ interface PaymentState {
   term?: number;
   academicYear: string;
   payingCategories?: PayingCategory[];
+  payingTerms?: PayingTerm[];
 }
 
 export default function PaymentGateway() {
@@ -182,26 +188,75 @@ export default function PaymentGateway() {
 
       // 3. Post to payment collection backend API
       const { data: { session } } = await supabase.auth.getSession();
-      const response = await fetch(`${getApiBaseUrl()}/api/payments/collect`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token}`,
-        },
-        body: JSON.stringify({
-          student_id: state.studentId,
-          type: state.paymentType,
-          academic_year: state.academicYear,
-          amount: state.amount || 0,
-          method: 'qr_code',
-          term: state.term !== undefined ? state.term : 1, // Represents term for course, month for transport
-          receipt_number: receiptNumber
-        }),
-      });
+      if (state.paymentType === 'course' && state.payingTerms && state.payingTerms.length > 0) {
+        for (const payingTerm of state.payingTerms) {
+          const response = await fetch(`${getApiBaseUrl()}/api/payments/collect`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session?.access_token}`,
+            },
+            body: JSON.stringify({
+              student_id: state.studentId,
+              type: 'course',
+              academic_year: state.academicYear,
+              amount: payingTerm.amount,
+              method: 'qr_code',
+              term: payingTerm.term,
+              receipt_number: receiptNumber
+            }),
+          });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to submit payment details to backend.');
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || 'Failed to submit course payment details to backend.');
+          }
+        }
+      } else if (state.paymentType === 'accessories' && state.payingCategories && state.payingCategories.length > 0) {
+        for (const cat of state.payingCategories) {
+          const response = await fetch(`${getApiBaseUrl()}/api/payments/accessories`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session?.access_token}`,
+            },
+            body: JSON.stringify({
+              student_id: state.studentId,
+              category_id: cat.categoryId,
+              amount_paid: cat.amount,
+              payment_method: 'qr_code',
+              receipt_number: receiptNumber,
+              remarks: `QR Payment for ${cat.name}`
+            }),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || 'Failed to submit accessories payment details to backend.');
+          }
+        }
+      } else {
+        const response = await fetch(`${getApiBaseUrl()}/api/payments/collect`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`,
+          },
+          body: JSON.stringify({
+            student_id: state.studentId,
+            type: state.paymentType,
+            academic_year: state.academicYear,
+            amount: state.amount || 0,
+            method: 'qr_code',
+            term: state.term !== undefined ? state.term : 1,
+            receipt_number: receiptNumber
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || 'Failed to submit payment details to backend.');
+        }
       }
 
       // 4. Update the created row with receipt URL in the notes column
@@ -377,7 +432,31 @@ export default function PaymentGateway() {
                         </Badge>
                       </div>
 
-                      {state.paymentType === 'course' && state.term !== undefined && (
+                      {state.paymentType === 'course' && state.payingTerms && state.payingTerms.length > 0 && (
+                        <div className="space-y-1.5 border-t border-slate-800 pt-3 mt-3">
+                          <p className="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Terms Breakdown</p>
+                          {state.payingTerms.map((pt, i) => (
+                            <div key={i} className="flex items-center justify-between text-xs text-slate-400">
+                              <span>{pt.term === 0 ? 'Old Outstanding Dues' : `Term ${pt.term}`}</span>
+                              <span className="font-semibold text-slate-300">{formatCurrency(pt.amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {state.paymentType === 'accessories' && state.payingCategories && state.payingCategories.length > 0 && (
+                        <div className="space-y-1.5 border-t border-slate-800 pt-3 mt-3">
+                          <p className="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Items Breakdown</p>
+                          {state.payingCategories.map((cat, i) => (
+                            <div key={i} className="flex items-center justify-between text-xs text-slate-400">
+                              <span>{cat.name}</span>
+                              <span className="font-semibold text-slate-300">{formatCurrency(cat.amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {state.paymentType === 'course' && state.term !== undefined && (!state.payingTerms || state.payingTerms.length === 0) && (
                         <div className="flex items-center justify-between text-xs text-slate-400">
                           <span className="font-semibold uppercase tracking-wider">Target Period</span>
                           <span className="font-bold text-slate-200">
