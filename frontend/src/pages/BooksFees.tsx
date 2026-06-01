@@ -467,7 +467,7 @@ export default function BooksFees() {
         </motion.div>
 
         <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="font-display text-xl">Collect Books Fee</DialogTitle>
             </DialogHeader>

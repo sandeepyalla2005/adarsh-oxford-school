@@ -605,7 +605,7 @@ export default function AccessoriesFees() {
 
       {/* Dialog 1: Manage Global Categories */}
       <Dialog open={manageCategoriesDialogOpen} onOpenChange={setManageCategoriesDialogOpen}>
-          <DialogContent className="max-w-xl">
+          <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                   <DialogTitle className="text-xl">Accessory Categories Master</DialogTitle>
                   <DialogDescription>Define the available items like Uniforms, Field Trips, Books.</DialogDescription>
@@ -643,7 +643,7 @@ export default function AccessoriesFees() {
 
       {/* Dialog 2: Assign Categories to Student */}
       <Dialog open={assignDialogOpen} onOpenChange={setAssignDialogOpen}>
-          <DialogContent className="max-w-xl">
+          <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                   <DialogTitle className="text-xl">Assign Categories</DialogTitle>
                   <DialogDescription>Select which fees {selectedStudentToAssign?.full_name} needs to pay.</DialogDescription>
@@ -692,7 +692,7 @@ export default function AccessoriesFees() {
       
       {/* Dialog 3: Payment */}
       <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                   <DialogTitle className="text-xl">Fee Collection Form</DialogTitle>
                   <DialogDescription>Collecting for {selectedStudentForPayment?.full_name}</DialogDescription>
