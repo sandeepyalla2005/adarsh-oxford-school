@@ -784,7 +784,7 @@ export default function LeftStudents() {
                       <th className="px-5 py-4 text-center">T.C. Number</th>
                       <th className="px-5 py-4 text-center">Fee Status</th>
                       <th className="px-5 py-4 text-right">Pending Amount</th>
-                      <th className="px-5 py-4 text-center">T.C. Document</th>
+                      <th className="px-5 py-4 text-center">T.C. Status</th>
                     </>
                   )}
 
@@ -882,14 +882,7 @@ export default function LeftStudents() {
                               ₹{record.currentDue.toLocaleString('en-IN')}
                             </td>
                             <td className="px-5 py-4 text-center">
-                              <Button 
-                                size="sm" 
-                                variant="outline"
-                                onClick={() => handleDownloadPlaceholder('Transfer Certificate', studentDetails.full_name)}
-                                className="h-8 rounded-lg text-[10px] font-bold border-slate-200 text-slate-600 hover:text-blue-600 px-3 flex gap-1.5 mx-auto"
-                              >
-                                <Download className="h-3 w-3" /> Download
-                              </Button>
+                              {getTcStatusBadge(record.tcIssued)}
                             </td>
                           </>
                         )}
@@ -949,14 +942,9 @@ export default function LeftStudents() {
                                     Issue T.C.
                                   </Button>
                                 ) : (
-                                  <Button
-                                    onClick={() => handleDownloadPlaceholder('Transfer Certificate', studentDetails.full_name)}
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-8 border-slate-200 bg-white text-slate-600 hover:text-blue-600 text-[10px] px-3 font-bold shadow-xs flex items-center gap-1"
-                                  >
-                                    <Download className="h-3 w-3" /> Download T.C.
-                                  </Button>
+                                  <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 h-8 text-[10px] px-3 font-extrabold rounded-lg flex items-center justify-center border select-none">
+                                    T.C. Issued
+                                  </Badge>
                                 )}
 
                                 {/* 2. Marksheet Button Logic */}
@@ -1010,14 +998,9 @@ export default function LeftStudents() {
                                     Issue T.C.
                                   </Button>
                                 ) : (
-                                  <Button
-                                    onClick={() => handleDownloadPlaceholder('Transfer Certificate', studentDetails.full_name)}
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-8 border-slate-200 bg-white text-slate-600 hover:text-blue-600 text-[10px] px-3 font-bold shadow-xs flex items-center gap-1"
-                                  >
-                                    <Download className="h-3 w-3" /> Download T.C.
-                                  </Button>
+                                  <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 h-8 text-[10px] px-3 font-extrabold rounded-lg flex items-center justify-center border select-none">
+                                    T.C. Issued
+                                  </Badge>
                                 )}
 
                                 {/* 2. Collect Fee Button (disabled if pending = 0) */}
