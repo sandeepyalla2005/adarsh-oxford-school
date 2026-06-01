@@ -1018,6 +1018,90 @@ async def collect_payment(request: PaymentCollectionRequest, background_tasks: B
         table = table_map.get(request.type)
         if not table:
             raise HTTPException(status_code=400, detail="Invalid payment type")
+
+        # 1.5 Validate payment limits to prevent overpayments
+        student_check = admin_client.table("students")\
+            .select("term1_fee, term2_fee, term3_fee, old_dues, books_fee, has_books, transport_fee, has_transport")\
+            .eq("id", request.student_id)\
+            .single()\
+            .execute()
+            
+        if not student_check.data:
+            raise HTTPException(status_code=404, detail="Student not found")
+            
+        student_info = student_check.data
+        
+        if request.type == "course":
+            term_val = request.term
+            term_fee = 0.0
+            if term_val == 1:
+                term_fee = float(student_info.get("term1_fee") or 0.0)
+            elif term_val == 2:
+                term_fee = float(student_info.get("term2_fee") or 0.0)
+            elif term_val == 3:
+                term_fee = float(student_info.get("term3_fee") or 0.0)
+            elif term_val == 0:
+                term_fee = float(student_info.get("old_dues") or 0.0)
+            else:
+                raise HTTPException(status_code=400, detail="Invalid term number")
+
+            # Fetch payments already recorded for this term
+            payments_res = admin_client.table("course_payments")\
+                .select("amount_paid")\
+                .eq("student_id", request.student_id)\
+                .eq("academic_year", request.academic_year)\
+                .eq("term", term_val)\
+                .execute()
+            
+            paid_so_far = sum(float(p.get("amount_paid") or 0.0) for p in (payments_res.data or []))
+            remaining_due = max(0.0, term_fee - paid_so_far)
+            
+            if request.amount > remaining_due:
+                if request.amount - remaining_due > 0.01:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Payment amount {request.amount} exceeds the remaining pending balance of {remaining_due} for this term."
+                    )
+        elif request.type == "books":
+            books_fee = float(student_info.get("books_fee") or 0.0) if student_info.get("has_books") else 0.0
+            
+            # Fetch payments already recorded for books
+            payments_res = admin_client.table("books_payments")\
+                .select("amount_paid")\
+                .eq("student_id", request.student_id)\
+                .eq("academic_year", request.academic_year)\
+                .execute()
+                
+            paid_so_far = sum(float(p.get("amount_paid") or 0.0) for p in (payments_res.data or []))
+            remaining_due = max(0.0, books_fee - paid_so_far)
+            
+            if request.amount > remaining_due:
+                if request.amount - remaining_due > 0.01:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Payment amount {request.amount} exceeds the remaining pending balance of {remaining_due} for books fees."
+                    )
+        elif request.type == "transport":
+            transport_monthly = float(student_info.get("transport_fee") or 0.0)
+            quarterly_fee = transport_monthly * 3.0
+            
+            # Fetch payments already recorded for this specific quarter (month value 1-4)
+            payments_res = admin_client.table("transport_payments")\
+                .select("amount_paid")\
+                .eq("student_id", request.student_id)\
+                .eq("academic_year", request.academic_year)\
+                .eq("month", request.term)\
+                .execute()
+                
+            paid_so_far = sum(float(p.get("amount_paid") or 0.0) for p in (payments_res.data or []))
+            remaining_due = max(0.0, quarterly_fee - paid_so_far)
+            
+            if request.amount > remaining_due:
+                if request.amount - remaining_due > 0.01:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Payment amount {request.amount} exceeds the remaining pending balance of {remaining_due} for this quarter."
+                    )
             
         # 2. Prepare data
         payment_data = {
@@ -2023,7 +2107,38 @@ async def create_accessory_payment(payment: AccessoryPayment, user=Depends(get_c
     try:
         logger.info(f"Creating accessory payment for student {payment.student_id} by user {user.id}")
         receipt_number = payment.receipt_number or f"ACC-{os.urandom(4).hex().upper()}"
+        academic_year = get_current_academic_year()
         
+        # Validate accessory overpayment
+        assignment_res = supabase.table("student_accessory_fees")\
+            .select("amount")\
+            .eq("student_id", payment.student_id)\
+            .eq("category_id", payment.category_id)\
+            .eq("academic_year", academic_year)\
+            .execute()
+            
+        if not assignment_res.data:
+            raise HTTPException(status_code=400, detail="Accessory category is not assigned to this student")
+            
+        assigned_fee = float(assignment_res.data[0].get("amount") or 0.0)
+        
+        payments_res = supabase.table("student_accessory_payments")\
+            .select("amount_paid")\
+            .eq("student_id", payment.student_id)\
+            .eq("category_id", payment.category_id)\
+            .eq("academic_year", academic_year)\
+            .execute()
+            
+        paid_so_far = sum(float(p.get("amount_paid") or 0.0) for p in (payments_res.data or []))
+        remaining_due = max(0.0, assigned_fee - paid_so_far)
+        
+        if payment.amount_paid > remaining_due:
+            if payment.amount_paid - remaining_due > 0.01:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Payment amount {payment.amount_paid} exceeds the remaining pending balance of {remaining_due} for this accessory category."
+                )
+                
         payment_data = {
             "student_id": payment.student_id,
             "category_id": payment.category_id,
