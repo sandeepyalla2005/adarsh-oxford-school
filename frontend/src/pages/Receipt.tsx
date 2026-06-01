@@ -2,15 +2,25 @@ import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Printer, ArrowLeft, Loader2 } from 'lucide-react';
+import { Printer, ArrowLeft, Loader2, Search, FileText, ChevronRight, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
-import { buildApiUrl } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
 import { getCurrentAcademicYear } from '@/lib/academic-year';
+import { getCurrentPortal, portalPath } from '@/lib/portal';
+import { supabase } from '@/integrations/supabase/client';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { motion } from 'framer-motion';
 
 interface ReceiptData {
     receiptNo: string;
     date: string;
     studentName: string;
+    parentName: string;
+    parentMobile: string;
     admissionNo: string;
     class: string;
     academicYear: string;
@@ -21,26 +31,176 @@ interface ReceiptData {
 }
 
 export default function Receipt() {
-    const [searchParams] = useSearchParams();
+    const [searchParams, setSearchParams] = useSearchParams();
     const navigate = useNavigate();
     const [data, setData] = useState<ReceiptData | null>(null);
     const [loading, setLoading] = useState(true);
 
-    const receiptNo = searchParams.get('receiptNo');
-    const type = searchParams.get('type'); // 'course', 'books', 'transport'
+    // Search and filter states for receipts lookup
+    const [students, setStudents] = useState<any[]>([]);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [selectedClass, setSelectedClass] = useState('all');
+    const [classes, setClasses] = useState<any[]>([]);
+    const [selectedStudent, setSelectedStudent] = useState<any | null>(null);
+    const [studentReceipts, setStudentReceipts] = useState<any[]>([]);
+    const [fetchingReceipts, setFetchingReceipts] = useState(false);
+
+    // Support all common casing and parameter names for receipt number and type
+    const receiptNo = searchParams.get('receiptNo') || 
+                      searchParams.get('receipt_no') || 
+                      searchParams.get('receipt_number') || 
+                      searchParams.get('receiptnumber') || 
+                      searchParams.get('id');
+
+    const type = searchParams.get('type') || 
+                 searchParams.get('fee_type') || 
+                 searchParams.get('feeType');
+
+    const handleBack = () => {
+        // If we entered via direct sidebar search lookup, clear searchParams to return to student selection
+        if (searchParams.has('search_back')) {
+            setSearchParams({});
+            setSelectedStudent(null);
+            setStudentReceipts([]);
+            return;
+        }
+
+        if (type) {
+            const portal = getCurrentPortal(window.location.pathname);
+            const feePages: Record<string, string> = {
+                course: '/course-fees',
+                books: '/books-fees',
+                transport: '/transport-fees',
+                accessories: '/accessories',
+                accessory: '/accessories'
+            };
+            const targetPage = feePages[type] || '/dashboard';
+            navigate(portalPath(portal, targetPage));
+        } else {
+            // Direct receipt view from history back
+            navigate(-1);
+        }
+    };
 
     useEffect(() => {
         if (receiptNo) {
             fetchReceiptData();
         } else {
             setLoading(false);
-            toast.error("Invalid Receipt Details");
+            fetchClasses();
+            fetchStudents();
         }
     }, [receiptNo, type]);
 
+    const fetchClasses = async () => {
+        try {
+            const { data } = await supabase
+                .from('classes')
+                .select('id, name')
+                .order('sort_order');
+            if (data) setClasses(data);
+        } catch (err) {
+            console.error("Error fetching classes:", err);
+        }
+    };
+
+    const fetchStudents = async () => {
+        try {
+            const { data } = await supabase
+                .from('students')
+                .select('id, admission_number, full_name, class_id, classes(name)')
+                .eq('is_active', true)
+                .order('full_name');
+            if (data) setStudents(data);
+        } catch (err) {
+            console.error("Error fetching students:", err);
+        }
+    };
+
+    const fetchStudentReceipts = async (studentId: string) => {
+        setFetchingReceipts(true);
+        try {
+            const [
+                courseRes,
+                booksRes,
+                transportRes,
+                accessorySalesRes,
+                studentAccessoryPaymentsRes
+            ] = await Promise.all([
+                supabase.from('course_payments').select('id, receipt_number, amount_paid, payment_method, payment_date, term').eq('student_id', studentId),
+                supabase.from('books_payments').select('id, receipt_number, amount_paid, payment_method, payment_date').eq('student_id', studentId),
+                supabase.from('transport_payments').select('id, receipt_number, amount_paid, payment_method, payment_date, month').eq('student_id', studentId),
+                supabase.from('accessory_sales').select('id, receipt_number, total_amount, payment_method, created_at, accessories(item_name)').eq('student_id', studentId),
+                supabase.from('student_accessory_payments').select('id, receipt_number, amount_paid, payment_method, payment_date, accessory_categories(name)').eq('student_id', studentId)
+            ]);
+
+            const all: any[] = [
+                ...(courseRes.data || []).map(p => ({
+                    id: p.id,
+                    receiptNo: p.receipt_number,
+                    amount: Number(p.amount_paid),
+                    method: p.payment_method,
+                    date: p.payment_date,
+                    type: 'course',
+                    details: p.term === 0 ? 'Old Due' : `Term ${p.term}`
+                })),
+                ...(booksRes.data || []).map(p => ({
+                    id: p.id,
+                    receiptNo: p.receipt_number,
+                    amount: Number(p.amount_paid),
+                    method: p.payment_method,
+                    date: p.payment_date,
+                    type: 'books',
+                    details: 'Books & Accessories Fee'
+                })),
+                ...(transportRes.data || []).map(p => ({
+                    id: p.id,
+                    receiptNo: p.receipt_number,
+                    amount: Number(p.amount_paid),
+                    method: p.payment_method,
+                    date: p.payment_date,
+                    type: 'transport',
+                    details: p.month ? new Date(0, p.month - 1).toLocaleString('default', { month: 'short' }) : 'Transport Fee'
+                })),
+                ...(accessorySalesRes.data || []).map(p => ({
+                    id: p.id,
+                    receiptNo: p.receipt_number,
+                    amount: Number(p.total_amount),
+                    method: p.payment_method,
+                    date: p.created_at,
+                    type: 'accessory',
+                    details: (p.accessories as any)?.item_name || 'Accessory Item'
+                })),
+                ...(studentAccessoryPaymentsRes.data || []).map(p => ({
+                    id: p.id,
+                    receiptNo: p.receipt_number,
+                    amount: Number(p.amount_paid),
+                    method: p.payment_method,
+                    date: p.payment_date,
+                    type: 'accessories',
+                    details: (p.accessory_categories as any)?.name || 'Accessory category'
+                }))
+            ];
+
+            // Sort by date descending
+            all.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            setStudentReceipts(all);
+        } catch (err) {
+            console.error("Error fetching receipts:", err);
+            toast.error("Failed to fetch student receipts");
+        } finally {
+            setFetchingReceipts(false);
+        }
+    };
+
+    const viewReceipt = (receiptNumber: string, feeType: string) => {
+        setSearchParams({ receiptNo: receiptNumber, type: feeType, search_back: 'true' });
+    };
+
     const fetchReceiptData = async () => {
         try {
-            const resp = await fetch(buildApiUrl(`/api/receipts/${encodeURIComponent(receiptNo || '')}`, { type: type ?? undefined }));
+            const pathWithQuery = `/api/receipts/${encodeURIComponent(receiptNo || '')}${type ? `?type=${encodeURIComponent(type)}` : ''}`;
+            const resp = await apiFetch(pathWithQuery);
             if (!resp.ok) throw new Error("Receipt not found in Backend");
             
             const paymentData = await resp.json();
@@ -51,8 +211,12 @@ export default function Receipt() {
             const record = records[0] as any;
 
             // Format date
-            const dateObj = new Date(record.created_at || new Date());
+            const dateObj = new Date(record.created_at || record.payment_date || new Date());
             const dateStr = dateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+            // Extract Parent Details
+            const parentName = record.students?.father_name || record.students?.mother_name || 'N/A';
+            const parentMobile = record.students?.father_phone || record.students?.mother_phone || 'N/A';
 
             // Calculate total and build particulars
             let totalAmount = 0;
@@ -69,13 +233,15 @@ export default function Receipt() {
                 receiptNo: record.receipt_number,
                 date: dateStr,
                 studentName: record.students?.full_name || 'N/A',
+                parentName: parentName,
+                parentMobile: parentMobile,
                 admissionNo: record.students?.admission_number || 'N/A',
                 class: record.students?.classes?.name || 'N/A',
                 academicYear: record.academic_year || getCurrentAcademicYear(),
                 particulars: particulars,
                 totalAmount: totalAmount,
-                paymentMode: record.payment_method || 'Cash',
-                narration: `Fees for ${type === 'course' ? (record.term === 0 ? 'OLD DUE' : `Term ${record.term}`) : type || 'receipt'}`
+                paymentMode: formatPaymentMode(record.payment_method),
+                narration: record.notes?.includes('Receipt URL') ? `Fee payment received. Receipt verified.` : `Fee payment received.`
             };
 
             setData(receiptDataObj);
@@ -87,13 +253,21 @@ export default function Receipt() {
         }
     };
 
+    const formatPaymentMode = (method: string) => {
+        if (!method) return 'UPI / Cash / Card';
+        if (method.toLowerCase() === 'qr_code') return 'UPI';
+        if (method.toLowerCase() === 'cash') return 'Cash';
+        if (method.toLowerCase() === 'card') return 'Card';
+        return method.toUpperCase();
+    };
+
     const getParticularsName = (type: string | null, data: any) => {
-        if (type === 'course') return `COURSE FEE (${data.term === 0 ? 'OLD DUE' : `Term ${data.term}`})`;
-        if (type === 'books') return `BOOKS & ACCESSORIES`;
-        if (type === 'transport') return `TRANSPORT FEE (${data.month ? new Date(0, data.month - 1).toLocaleString('default', { month: 'long' }) : 'Monthly'})`;
-        if (type === 'accessories') return `ACCESSORY: ${data.accessory_categories?.name || 'FEE'}`;
-        if (type === 'accessory') return `ACCESSORY: ${data.accessories?.item_name || 'Item'} (${data.quantity || 1} qty)`;
-        return 'FEE PAYMENT';
+        if (type === 'course') return `Tuition Fee (${data.term === 0 ? 'OLD DUE' : `Term ${data.term}`})`;
+        if (type === 'books') return `Books & Accessories Fee`;
+        if (type === 'transport') return `Transport Fee (${data.month ? new Date(0, data.month - 1).toLocaleString('default', { month: 'long' }) : 'Monthly'})`;
+        if (type === 'accessories') return `Accessories: ${data.accessory_categories?.name || 'FEE'}`;
+        if (type === 'accessory') return `Accessory: ${data.accessories?.item_name || 'Item'} (${data.quantity || 1} qty)`;
+        return 'Tuition Fee';
     };
 
     const numberToWords = (num: number): string => {
@@ -118,6 +292,28 @@ export default function Receipt() {
         window.print();
     };
 
+    const getFeeTypeBadge = (feeType: string) => {
+        const variants: Record<string, string> = {
+            course: 'bg-primary/10 text-primary border-primary/20',
+            books: 'bg-secondary/15 text-secondary-foreground border-secondary/20',
+            transport: 'bg-success/10 text-success border-success/20',
+            accessories: 'bg-info/10 text-info border-info/20',
+            accessory: 'bg-warning/10 text-warning-foreground border-warning/20',
+        };
+        const labels: Record<string, string> = {
+            course: 'Course Fee',
+            books: 'Books Fee',
+            transport: 'Transport',
+            accessories: 'Accessories',
+            accessory: 'Accessory Sale',
+        };
+        return (
+            <Badge variant="outline" className={`${variants[feeType] || ''} font-bold text-[10px] uppercase tracking-wider py-0.5 px-2 shrink-0 border`}>
+                {labels[feeType] || feeType}
+            </Badge>
+        );
+    };
+
     if (loading) {
         return (
             <div className="flex min-h-screen items-center justify-center bg-slate-50">
@@ -126,136 +322,357 @@ export default function Receipt() {
         );
     }
 
+    // Render Student receipts lookup dashboard when no specific receipt is requested
+    if (!receiptNo) {
+        const filteredStudents = students.filter(student => {
+            const matchesSearch = student.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                                  student.admission_number.toLowerCase().includes(searchQuery.toLowerCase());
+            const matchesClass = selectedClass === 'all' || student.classes?.name === selectedClass;
+            return matchesSearch && matchesClass;
+        });
+
+        return (
+            <DashboardLayout>
+                <div className="space-y-6 max-w-6xl mx-auto p-2">
+                    {/* Page Title Header */}
+                    <div className="page-header mb-6">
+                        <h1 className="page-title flex items-center gap-2">
+                            <ClipboardList className="h-6 w-6 text-primary" />
+                            Receipts Lookup Module
+                        </h1>
+                        <p className="page-description">Search for a student and view/print their official fee receipts across all categories</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        {/* Left Column: Student Search */}
+                        <div className="lg:col-span-5 space-y-4">
+                            <Card className="card-elevated p-4">
+                                <h2 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                    <Search className="h-4 w-4 text-primary" />
+                                    Student Search
+                                </h2>
+                                <div className="space-y-3">
+                                    <div className="relative">
+                                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                        <Input
+                                            placeholder="Search by name or admission number..."
+                                            value={searchQuery}
+                                            onChange={(e) => setSearchQuery(e.target.value)}
+                                            className="pl-10 bg-slate-50/50 focus-visible:bg-white"
+                                        />
+                                    </div>
+
+                                    <div className="space-y-1.5">
+                                        <span className="text-xs font-semibold text-slate-500">Filter by Class</span>
+                                        <Select value={selectedClass} onValueChange={setSelectedClass}>
+                                            <SelectTrigger className="w-full bg-slate-50/50">
+                                                <SelectValue placeholder="All Classes" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">All Classes</SelectItem>
+                                                {classes.map((cls) => (
+                                                    <SelectItem key={cls.id} value={cls.name}>
+                                                        {cls.name}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                            </Card>
+
+                            {/* Search Results List */}
+                            <Card className="card-elevated p-0 overflow-hidden max-h-[500px] flex flex-col">
+                                <div className="p-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center shrink-0">
+                                    <span className="text-xs font-bold text-slate-500">Students Found ({filteredStudents.length})</span>
+                                </div>
+                                <div className="overflow-y-auto divide-y divide-slate-100 flex-1 min-h-[300px]">
+                                    {filteredStudents.length === 0 ? (
+                                        <div className="p-8 text-center text-slate-400 text-sm">
+                                            No students matched your search criteria.
+                                        </div>
+                                    ) : (
+                                        filteredStudents.map((student) => {
+                                            const isSelected = selectedStudent?.id === student.id;
+                                            return (
+                                                <motion.button
+                                                    key={student.id}
+                                                    whileHover={{ x: 2 }}
+                                                    onClick={() => {
+                                                        setSelectedStudent(student);
+                                                        fetchStudentReceipts(student.id);
+                                                    }}
+                                                    className={`w-full text-left p-3.5 flex justify-between items-center transition-colors ${
+                                                        isSelected ? 'bg-primary/5 border-l-4 border-primary text-primary font-bold' : 'hover:bg-slate-50/80 text-slate-700'
+                                                    }`}
+                                                >
+                                                    <div className="space-y-0.5">
+                                                        <p className={`text-sm ${isSelected ? 'font-extrabold' : 'font-semibold'}`}>
+                                                            {student.full_name}
+                                                        </p>
+                                                        <div className="flex gap-2 text-xs text-slate-400">
+                                                            <span>Class: <span className="text-slate-600 font-medium">{student.classes?.name || 'N/A'}</span></span>
+                                                            <span>•</span>
+                                                            <span>Adm No: <span className="text-slate-600 font-medium">{student.admission_number}</span></span>
+                                                        </div>
+                                                    </div>
+                                                    <ChevronRight className={`h-4 w-4 shrink-0 transition-transform ${isSelected ? 'translate-x-1 text-primary' : 'text-slate-400'}`} />
+                                                </motion.button>
+                                            );
+                                        })
+                                    )}
+                                </div>
+                            </Card>
+                        </div>
+
+                        {/* Right Column: Student Receipts Table */}
+                        <div className="lg:col-span-7">
+                            <Card className="card-elevated min-h-[480px] p-6 flex flex-col">
+                                {!selectedStudent ? (
+                                    <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
+                                        <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center mb-4">
+                                            <ClipboardList className="h-8 w-8 text-slate-400" />
+                                        </div>
+                                        <h3 className="text-lg font-bold text-slate-800 mb-1">No Student Selected</h3>
+                                        <p className="text-slate-400 text-sm max-w-sm">
+                                            Please search and select a student from the left panel to view their official receipts history.
+                                        </p>
+                                    </div>
+                                ) : fetchingReceipts ? (
+                                    <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
+                                        <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
+                                        <p className="text-slate-500 text-sm">Loading fee payment receipts...</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4 flex-1 flex flex-col">
+                                        {/* Student Header */}
+                                        <div className="border-b border-slate-100 pb-4 mb-2 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 shrink-0">
+                                            <div>
+                                                <h3 className="text-lg font-black text-slate-800">{selectedStudent.full_name}</h3>
+                                                <div className="flex gap-3 text-xs text-slate-500 mt-1">
+                                                    <span>Class: <span className="font-bold text-slate-700">{selectedStudent.classes?.name || 'N/A'}</span></span>
+                                                    <span>•</span>
+                                                    <span>Admission No: <span className="font-bold text-slate-700">{selectedStudent.admission_number}</span></span>
+                                                </div>
+                                            </div>
+                                            <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-0 py-1 px-3 text-xs shrink-0 self-start sm:self-auto font-bold">
+                                                {studentReceipts.length} Receipts
+                                            </Badge>
+                                        </div>
+
+                                        {/* Receipts List Table */}
+                                        <div className="overflow-x-auto flex-1">
+                                            <Table>
+                                                <TableHeader>
+                                                    <TableRow className="table-header">
+                                                        <TableHead className="w-32">Receipt No.</TableHead>
+                                                        <TableHead>Fee Type</TableHead>
+                                                        <TableHead>Particulars</TableHead>
+                                                        <TableHead className="text-right">Amount</TableHead>
+                                                        <TableHead className="text-center w-24">Action</TableHead>
+                                                    </TableRow>
+                                                </TableHeader>
+                                                <TableBody>
+                                                    {studentReceipts.length === 0 ? (
+                                                        <TableRow>
+                                                            <TableCell colSpan={5} className="text-center py-12 text-slate-400 text-sm">
+                                                                No payment receipts found for this student.
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ) : (
+                                                        studentReceipts.map((receipt) => (
+                                                            <TableRow key={receipt.id} className="hover:bg-slate-50/50">
+                                                                <TableCell className="font-mono text-xs font-semibold text-slate-600">
+                                                                    {receipt.receiptNo}
+                                                                </TableCell>
+                                                                <TableCell className="py-2.5">
+                                                                    {getFeeTypeBadge(receipt.type)}
+                                                                </TableCell>
+                                                                <TableCell className="text-slate-600 font-semibold text-xs">
+                                                                    {receipt.details}
+                                                                </TableCell>
+                                                                <TableCell className="text-right font-black text-slate-800">
+                                                                    ₹{receipt.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                                                </TableCell>
+                                                                <TableCell className="text-center">
+                                                                    <Button
+                                                                        variant="ghost"
+                                                                        size="sm"
+                                                                        onClick={() => viewReceipt(receipt.receiptNo, receipt.type)}
+                                                                        className="h-8 w-8 p-0"
+                                                                        title="View/Print Receipt"
+                                                                    >
+                                                                        <FileText className="h-4 w-4 text-primary" />
+                                                                    </Button>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        ))
+                                                    )}
+                                                </TableBody>
+                                            </Table>
+                                        </div>
+                                    </div>
+                                )}
+                            </Card>
+                        </div>
+                    </div>
+                </div>
+            </DashboardLayout>
+        );
+    }
+
     if (!data) {
         return (
             <div className="flex flex-col min-h-screen items-center justify-center bg-slate-50 gap-4">
                 <p className="text-slate-500">Receipt not found.</p>
-                <Button onClick={() => navigate(-1)} variant="outline">Go Back</Button>
+                <Button onClick={handleBack} variant="outline">Go Back</Button>
             </div>
         );
     }
 
     return (
         <div className="min-h-screen bg-slate-100 p-4 md:p-8 print:p-0 print:bg-white flex flex-col items-center">
-            <div className="w-full max-w-4xl mb-6 flex flex-wrap gap-4 justify-between items-center print:hidden">
-                <Button onClick={() => navigate(-1)} variant="outline" className="gap-2">
+            {/* Top print utility bar */}
+            <div className="w-full max-w-[800px] mb-6 flex flex-wrap gap-4 justify-between items-center print:hidden">
+                <Button onClick={handleBack} variant="outline" className="gap-2 border-slate-300 text-slate-700 bg-white hover:bg-slate-50">
                     <ArrowLeft className="h-4 w-4" /> Back
                 </Button>
-                <Button onClick={handlePrint} className="gap-2 bg-[#002147] text-white hover:bg-[#002147]/90">
+                <Button onClick={handlePrint} className="gap-2 bg-[#002147] text-white hover:bg-[#002147]/90 font-bold">
                     <Printer className="h-4 w-4" /> Print Receipt
                 </Button>
             </div>
 
-            <Card className="w-full max-w-[800px] bg-white p-4 md:p-8 border print:border-0 print:shadow-none print:w-full print:max-w-none text-slate-900 shadow-xl overflow-hidden">
-                {/* Header */}
-                <div className="flex flex-col items-center border-b-2 border-slate-900 pb-4 mb-6 relative">
-                    <div className="flex flex-col">
-                        <h1 className="text-xl md:text-3xl font-black text-[#002147] tracking-tight uppercase font-serif">ADARSH OXFORD</h1>
-                        <p className="text-[10px] md:text-sm font-bold text-slate-600 uppercase tracking-[0.2em] -mt-1">English Medium School</p>
+            {/* Official School Receipt Card */}
+            <Card className="w-full max-w-[800px] bg-white p-6 md:p-8 border border-slate-300 print:border-0 print:shadow-none print:w-full print:max-w-none text-slate-900 shadow-lg relative overflow-hidden">
+                
+                {/* Header Branding */}
+                <div className="flex flex-col items-center pb-4 border-b border-slate-800 mb-6">
+                    <img 
+                        src="/school-logo.png" 
+                        alt="Adarsh Oxford Logo" 
+                        className="h-28 w-28 object-contain mb-3"
+                    />
+                    <h1 className="text-xl md:text-3xl font-black text-slate-900 tracking-wide text-center uppercase font-sans">
+                        ADARSH OXFORD ENGLISH MEDIUM SCHOOL
+                    </h1>
+                    <p className="text-xs md:text-sm font-semibold text-slate-700 text-center tracking-wide mt-1">
+                        2-50-102-9, Seethammadhara, North Extension, Visakhapatnam - 530013
+                    </p>
+                </div>
+
+                {/* Receipt Header Title */}
+                <div className="text-center my-6">
+                    <span className="text-lg md:text-xl font-bold uppercase tracking-widest border-b-2 border-slate-900 px-6 pb-1">
+                        FEE RECEIPT
+                    </span>
+                </div>
+
+                {/* Details Grid Table */}
+                <div className="w-full border border-slate-800 text-xs md:text-sm font-bold text-slate-800 mb-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 border-b border-slate-800">
+                        <div className="grid grid-cols-[110px_1fr] sm:border-r border-slate-800 p-2.5">
+                            <span className="text-slate-600">Receipt No</span>
+                            <span>: {data.receiptNo}</span>
+                        </div>
+                        <div className="grid grid-cols-[110px_1fr] p-2.5 border-t sm:border-t-0 border-slate-800">
+                            <span className="text-slate-600">Date</span>
+                            <span>: {data.date}</span>
+                        </div>
                     </div>
-                    <div className="mt-4">
-                        <span className="border-b-2 border-slate-900 text-lg md:text-xl font-bold uppercase tracking-widest px-2">Receipt</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 border-b border-slate-800">
+                        <div className="grid grid-cols-[110px_1fr] sm:border-r border-slate-800 p-2.5">
+                            <span className="text-slate-600">Student Name</span>
+                            <span className="break-all">: {data.studentName}</span>
+                        </div>
+                        <div className="grid grid-cols-[110px_1fr] p-2.5 border-t sm:border-t-0 border-slate-800">
+                            <span className="text-slate-600">Parent Name</span>
+                            <span className="break-all">: {data.parentName}</span>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 border-b border-slate-800">
+                        <div className="grid grid-cols-[110px_1fr] sm:border-r border-slate-800 p-2.5">
+                            <span className="text-slate-600">Parent Mobile</span>
+                            <span>: {data.parentMobile}</span>
+                        </div>
+                        <div className="grid grid-cols-[110px_1fr] p-2.5 border-t sm:border-t-0 border-slate-800">
+                            <span className="text-slate-600">Academic Year</span>
+                            <span>: {data.academicYear}</span>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2">
+                        <div className="grid grid-cols-[110px_1fr] sm:border-r border-slate-800 p-2.5">
+                            <span className="text-slate-600">Class</span>
+                            <span>: {data.class}</span>
+                        </div>
+                        <div className="grid grid-cols-[110px_1fr] p-2.5 border-t sm:border-t-0 border-slate-800">
+                            <span className="text-slate-600">Admission No</span>
+                            <span>: {data.admissionNo}</span>
+                        </div>
                     </div>
                 </div>
 
-                {/* Info Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-2 mb-6 text-xs md:text-sm font-bold border-b border-dashed border-slate-400 pb-6">
-                    <div className="grid grid-cols-[80px_auto] md:grid-cols-[100px_auto] gap-2">
-                        <span className="text-slate-600">Receipt No</span>
-                        <span className="break-all">: {data.receiptNo}</span>
-                    </div>
-                    <div className="grid grid-cols-[80px_auto] md:grid-cols-[120px_auto] gap-2">
-                        <span className="text-slate-600">Date</span>
-                        <span>: {data.date}</span>
-                    </div>
-
-                    <div className="grid grid-cols-[80px_auto] md:grid-cols-[100px_auto] gap-2">
-                        <span className="text-slate-600">Name</span>
-                        <span>: {data.studentName}</span>
-                    </div>
-                    <div className="grid grid-cols-[80px_auto] md:grid-cols-[120px_auto] gap-2">
-                        <span className="text-slate-600">Acd Year</span>
-                        <span>: {data.academicYear}</span>
-                    </div>
-
-                    <div className="grid grid-cols-[80px_auto] md:grid-cols-[100px_auto] gap-2">
-                        <span className="text-slate-600">Course</span>
-                        <span>: {data.class}</span>
-                    </div>
-                    <div className="grid grid-cols-[80px_auto] md:grid-cols-[120px_auto] gap-2">
-                        <span className="text-slate-600">Admin No</span>
-                        <span>: {data.admissionNo}</span>
-                    </div>
-                </div>
-
-                {/* Table */}
-                <div className="mb-6">
-                    <table className="w-full">
+                {/* Particulars Table */}
+                <div className="w-full border border-slate-800 text-xs md:text-sm font-bold text-slate-800 mb-6">
+                    <table className="w-full border-collapse">
                         <thead>
-                            <tr className="border-b-2 border-slate-200">
-                                <th className="text-left font-bold py-2 w-16">SL</th>
-                                <th className="text-left font-bold py-2">Particulars</th>
-                                <th className="text-right font-bold py-2 w-32">Amount</th>
+                            <tr className="border-b border-slate-800 bg-slate-50">
+                                <th className="border-r border-slate-800 p-2.5 text-left w-16">SL</th>
+                                <th className="border-r border-slate-800 p-2.5 text-left">Particulars</th>
+                                <th className="p-2.5 text-right w-40">Amount</th>
                             </tr>
                         </thead>
                         <tbody>
                             {data.particulars.map((item, index) => (
-                                <tr key={index} className="border-b border-slate-100">
-                                    <td className="py-3 font-medium">{index + 1}</td>
-                                    <td className="py-3 font-bold uppercase">{item.name}</td>
-                                    <td className="py-3 text-right font-bold">{item.amount.toFixed(2)}</td>
+                                <tr key={index} className="border-b border-slate-800 last:border-b-0">
+                                    <td className="border-r border-slate-800 p-2.5 font-medium">{index + 1}</td>
+                                    <td className="border-r border-slate-800 p-2.5 uppercase">{item.name}</td>
+                                    <td className="p-2.5 text-right font-black">₹{item.amount.toFixed(2)}</td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 </div>
 
-                {/* Totals */}
-                <div className="border-t-2 border-slate-900 pt-4 mb-6">
-                    <div className="flex justify-between items-center mb-2 font-bold">
-                        <div className="flex gap-4">
-                            <span>Mode Of Payment : <span className="uppercase">{data.paymentMode}</span></span>
-                            <span>Amount Received : {data.totalAmount.toFixed(2)}</span>
-                        </div>
-                        <div className="text-lg">
-                            Grand Total : {data.totalAmount.toFixed(2)}
-                        </div>
+                {/* Payment Mode & Totals */}
+                <div className="w-full border border-slate-800 text-xs md:text-sm font-bold text-slate-800 mb-6 grid grid-cols-2">
+                    <div className="border-r border-slate-800 p-2.5">
+                        <span className="text-slate-600 block text-[10px] uppercase tracking-wider mb-1">Mode of Payment</span>
+                        <span className="uppercase text-slate-800 font-bold">{data.paymentMode}</span>
                     </div>
-                    <div className="font-bold border-t border-dashed border-slate-400 pt-2 mt-2">
-                        Amount In Words : <span className="italic">{numberToWords(Math.floor(data.totalAmount))} Rupees Only</span>
+                    <div className="p-2.5 flex flex-col justify-between">
+                        <span className="text-slate-600 block text-[10px] uppercase tracking-wider mb-1">Grand Total</span>
+                        <span className="text-base md:text-lg font-black text-slate-900">₹{data.totalAmount.toFixed(2)}</span>
                     </div>
                 </div>
 
-                {/* Footer */}
-                <div className="text-sm border-t border-dashed border-slate-900 pt-4 mt-8">
-                    <div className="grid grid-cols-1 gap-1 mb-6">
-                        <p><span className="font-bold">Narration :</span> {data.narration}</p>
-                        <p className="text-xs text-slate-500 mt-2">NB:- This is a computer generated receipt and does not require physical signature.</p>
-                        <p className="text-xs text-slate-500">If Cheque/DD the receipt only valid after realization.</p>
-                    </div>
-
-                    <div className="flex justify-between items-end mt-8">
-                        <div className="text-xs text-slate-400">
-                            {new Date().toLocaleString()}
-                        </div>
-                        <div className="text-right font-bold text-[#002147]">
-                            Created By: Adarsh Oxford
-                        </div>
-                    </div>
+                {/* Footer Words, Narration & Sign */}
+                <div className="text-xs md:text-sm font-bold text-slate-800 space-y-3 mt-6">
+                    <p>
+                        Amount in Words : <span className="italic font-medium text-slate-700 underline decoration-slate-400 decoration-dashed">{numberToWords(Math.floor(data.totalAmount))} Rupees Only</span>
+                    </p>
+                    <p>
+                        Narration : <span className="font-semibold text-slate-600">{data.narration || 'Fee payment received.'}</span>
+                    </p>
                 </div>
+
+                {/* Disclaimer Disclaimer */}
+                <div className="text-center text-[10px] md:text-xs text-slate-500 font-semibold italic border-t border-slate-200 pt-4 mt-8 print:border-t-0">
+                    This is a computer-generated receipt and does not require a physical signature.
+                </div>
+
             </Card>
 
-            {/* Print Styles */}
+            {/* Print Styling overrides */}
             <style>{`
-        @media print {
-          @page { margin: 0.5cm; }
-          body { 
-            background: white; 
-            -webkit-print-color-adjust: exact !important; 
-          }
-          .no-print { display: none !important; }
-        }
-      `}</style>
+                @media print {
+                    @page { margin: 0.5cm; }
+                    body { 
+                        background: white; 
+                        -webkit-print-color-adjust: exact !important; 
+                    }
+                    .no-print { display: none !important; }
+                }
+            `}</style>
         </div>
     );
 }

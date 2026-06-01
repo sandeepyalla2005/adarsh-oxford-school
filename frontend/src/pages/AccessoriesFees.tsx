@@ -306,6 +306,28 @@ export default function AccessoriesFees() {
         return;
     }
 
+    if (paymentMethod === 'qr_code') {
+      setPaymentDialogOpen(false);
+      
+      const enrichedPayingCats = payingCategories.map(catId => ({
+        categoryId: catId,
+        amount: paymentSelections[catId].amount,
+        name: categories.find(c => c.id === catId)?.name || 'Accessory Item'
+      }));
+
+      navigate('/payment-gateway', {
+        state: {
+          studentId: selectedStudentForPayment.id,
+          studentName: selectedStudentForPayment.full_name,
+          className: selectedStudentForPayment.classes?.name,
+          paymentType: 'accessories',
+          academicYear: academicYear,
+          payingCategories: enrichedPayingCats
+        }
+      });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       // Process payments sequentially via FastAPI
@@ -694,7 +716,9 @@ export default function AccessoriesFees() {
               </div>
               <DialogFooter>
                   <DialogClose asChild><Button variant="ghost">Cancel</Button></DialogClose>
-                  <Button onClick={handlePayment} disabled={isSubmitting || totalPaymentAmount <= 0} className="btn-oxford px-8">Confirm & Receipt</Button>
+                  <Button onClick={handlePayment} disabled={isSubmitting || totalPaymentAmount <= 0} className="btn-oxford px-8">
+                    {paymentMethod === 'qr_code' ? 'Proceed to QR Pay' : 'Confirm & Receipt'}
+                  </Button>
               </DialogFooter>
           </DialogContent>
       </Dialog>

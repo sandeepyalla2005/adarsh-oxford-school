@@ -369,11 +369,11 @@ def send_sms(phone: str, message: str) -> None:
 
 def get_receipt_table_candidates(receipt_type: Optional[str] = None):
     table_map = {
-        "course": ("course_payments", "*, students(full_name, admission_number, classes(name))"),
-        "books": ("books_payments", "*, students(full_name, admission_number, classes(name))"),
-        "transport": ("transport_payments", "*, students(full_name, admission_number, classes(name))"),
-        "accessories": ("student_accessory_payments", "*, students(full_name, admission_number, classes(name)), accessory_categories(name)"),
-        "accessory": ("accessory_sales", "*, students(full_name, admission_number, classes(name)), accessories(item_name)"),
+        "course": ("course_payments", "*, students(full_name, admission_number, father_name, father_phone, mother_name, mother_phone, classes(name))"),
+        "books": ("books_payments", "*, students(full_name, admission_number, father_name, father_phone, mother_name, mother_phone, classes(name))"),
+        "transport": ("transport_payments", "*, students(full_name, admission_number, father_name, father_phone, mother_name, mother_phone, classes(name))"),
+        "accessories": ("student_accessory_payments", "*, students(full_name, admission_number, father_name, father_phone, mother_name, mother_phone, classes(name)), accessory_categories(name)"),
+        "accessory": ("accessory_sales", "*, students(full_name, admission_number, father_name, father_phone, mother_name, mother_phone, classes(name)), accessories(item_name)"),
     }
 
     if receipt_type:

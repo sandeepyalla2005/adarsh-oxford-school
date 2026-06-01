@@ -68,6 +68,7 @@ const AdminApprovals = lazyWithRetry(() => import("./pages/admin/AdminApprovals"
 const AdminAudit = lazyWithRetry(() => import("./pages/AdminAudit"));
 const FeeAnalytics = lazyWithRetry(() => import("./pages/FeeAnalytics"));
 const AccessoriesFees = lazyWithRetry(() => import("./pages/AccessoriesFees"));
+const PaymentGateway = lazyWithRetry(() => import("./pages/PaymentGateway"));
 const TableRegistryCheck = lazyWithRetry(() => import("./pages/TableRegistryCheck"));
 
 import { queryClient } from "@/lib/query-client";
@@ -136,6 +137,7 @@ const portalRoutes: PortalRouteDef[] = [
   { path: "/fee-history", element: <FeeHistory />, portals: ["admin", "fee"] },
   { path: "/pending-fees", element: <PendingFees />, portals: ["admin", "fee"] },
   { path: "/accessories", element: <AccessoriesFees />, portals: ["admin", "fee"] },
+  { path: "/payment-gateway", element: <PaymentGateway />, portals: ["admin", "fee"] },
   { path: "/accessories/history", element: <AccessoriesHistory />, portals: ["admin", "fee"] },
   { path: "/accessories/uniform", element: <UniformIssue />, portals: ["admin", "fee"] },
   { path: "/accessories/uniform/inventory", element: <AccessoriesUniform />, portals: ["admin", "fee"] },

@@ -208,6 +208,22 @@ export default function TransportFees() {
   const handlePayment = async () => {
     if (!selectedStudent || !paymentAmount || !selectedMonth || !user) return;
 
+    if (paymentMethod === 'qr_code') {
+      setPaymentDialogOpen(false);
+      navigate('/payment-gateway', {
+        state: {
+          studentId: selectedStudent.id,
+          studentName: selectedStudent.full_name,
+          className: selectedStudent.classes?.name,
+          amount: parseFloat(paymentAmount),
+          paymentType: 'transport',
+          term: parseInt(selectedMonth),
+          academicYear: academicYear
+        }
+      });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const receiptNumber = `TRN-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -608,7 +624,7 @@ export default function TransportFees() {
                     }}
                     disabled={isSubmitting || !paymentAmount || !selectedMonth || isStaff}
                   >
-                    {isSubmitting ? 'Processing...' : 'Confirm Payment'}
+                    {isSubmitting ? 'Processing...' : paymentMethod === 'qr_code' ? 'Proceed to QR Pay' : 'Confirm Payment'}
                     {isStaff && (
                       <span className="ml-2 text-xs">(Admin only)</span>
                     )}

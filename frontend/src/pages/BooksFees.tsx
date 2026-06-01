@@ -168,6 +168,21 @@ export default function BooksFees() {
   const handlePayment = async () => {
     if (!selectedStudent || !paymentAmount || !user) return;
 
+    if (paymentMethod === 'qr_code') {
+      setPaymentDialogOpen(false);
+      navigate('/payment-gateway', {
+        state: {
+          studentId: selectedStudent.id,
+          studentName: selectedStudent.full_name,
+          className: selectedStudent.classes?.name,
+          amount: parseFloat(paymentAmount),
+          paymentType: 'books',
+          academicYear: academicYear
+        }
+      });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const receiptNumber = `BKS-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -541,7 +556,7 @@ export default function BooksFees() {
                     }}
                     disabled={isSubmitting || !paymentAmount || isStaff}
                   >
-                    {isSubmitting ? 'Processing...' : 'Confirm Payment'}
+                    {isSubmitting ? 'Processing...' : paymentMethod === 'qr_code' ? 'Proceed to QR Pay' : 'Confirm Payment'}
                     {isStaff && (
                       <span className="ml-2 text-xs">(Admin only)</span>
                     )}
