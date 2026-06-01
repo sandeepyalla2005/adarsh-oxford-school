@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import { getCurrentAcademicYear } from '@/lib/academic-year';
 import { motion } from 'framer-motion';
 import { Search, IndianRupee, FileText, Download, CheckCircle, AlertTriangle, UserMinus, Pencil, RefreshCw } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
@@ -16,6 +18,7 @@ export default function LeftStudents() {
   const { userRole, isAdmin } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -118,6 +121,22 @@ export default function LeftStudents() {
     const pending = parseFloat(selectedRecord.total_pending_amount || 0) - parseFloat(selectedRecord.recovered_amount || 0);
     if (amount > pending) {
       toast({ variant: 'destructive', title: 'Invalid Amount', description: `Amount cannot exceed the pending balance (₹${pending.toLocaleString('en-IN')})` });
+      return;
+    }
+
+    if (collectMethod === 'QR_CODE') {
+      setIsCollectModalOpen(false);
+      navigate('/payment-gateway', {
+        state: {
+          studentId: selectedRecord.students?.id,
+          studentName: selectedRecord.students?.full_name,
+          className: selectedRecord.students?.classes?.name || 'N/A',
+          amount: amount,
+          paymentType: 'left_student',
+          academicYear: getCurrentAcademicYear(),
+          leftRecordId: selectedRecord.id
+        }
+      });
       return;
     }
 
@@ -427,6 +446,7 @@ export default function LeftStudents() {
                   <SelectContent>
                     <SelectItem value="CASH">Cash</SelectItem>
                     <SelectItem value="UPI">UPI</SelectItem>
+                    <SelectItem value="QR_CODE">Scanner (QR Code)</SelectItem>
                     <SelectItem value="BANK_TRANSFER">Bank Transfer</SelectItem>
                     <SelectItem value="CHEQUE">Cheque</SelectItem>
                   </SelectContent>

@@ -78,7 +78,8 @@ export default function Receipt() {
                 books: '/books-fees',
                 transport: '/transport-fees',
                 accessories: '/accessories',
-                accessory: '/accessories'
+                accessory: '/accessories',
+                left_student: '/left-students'
             };
             const targetPage = feePages[type] || '/dashboard';
             navigate(portalPath(portal, targetPage));
@@ -221,8 +222,9 @@ export default function Receipt() {
             const dateStr = dateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
             // Extract Parent Details
-            const parentName = record.students?.father_name || record.students?.mother_name || 'N/A';
-            const parentMobile = record.students?.father_phone || record.students?.mother_phone || 'N/A';
+            const student = record.students || record.left_student_fee_records?.students || {};
+            const parentName = student.father_name || student.mother_name || 'N/A';
+            const parentMobile = student.father_phone || student.mother_phone || 'N/A';
 
             // Calculate total and build particulars
             let totalAmount = 0;
@@ -238,16 +240,16 @@ export default function Receipt() {
             const receiptDataObj: ReceiptData = {
                 receiptNo: record.receipt_number,
                 date: dateStr,
-                studentName: record.students?.full_name || 'N/A',
+                studentName: student.full_name || 'N/A',
                 parentName: parentName,
                 parentMobile: parentMobile,
-                admissionNo: record.students?.admission_number || 'N/A',
-                class: record.students?.classes?.name || 'N/A',
+                admissionNo: student.admission_number || 'N/A',
+                class: student.classes?.name || 'N/A',
                 academicYear: record.academic_year || getCurrentAcademicYear(),
                 particulars: particulars,
                 totalAmount: totalAmount,
                 paymentMode: formatPaymentMode(record.payment_method),
-                narration: record.notes?.includes('Receipt URL') ? `Fee payment received. Receipt verified.` : `Fee payment received.`
+                narration: (record.notes?.includes('Receipt URL') || record.remarks?.includes('Receipt URL')) ? `Fee payment received. Receipt verified.` : `Fee payment received.`
             };
 
             setData(receiptDataObj);
@@ -273,6 +275,7 @@ export default function Receipt() {
         if (type === 'transport') return `Transport Fee (${data.month && MONTH_NAMES[data.month] ? MONTH_NAMES[data.month] : 'Monthly'})`;
         if (type === 'accessories') return `Accessories: ${data.accessory_categories?.name || 'FEE'}`;
         if (type === 'accessory') return `Accessory: ${data.accessories?.item_name || 'Item'} (${data.quantity || 1} qty)`;
+        if (type === 'left_student') return `Left Student Dues Recovery`;
         return 'Tuition Fee';
     };
 

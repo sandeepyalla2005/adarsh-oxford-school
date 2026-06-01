@@ -60,11 +60,12 @@ interface PaymentState {
   studentName: string;
   className: string;
   amount?: number;
-  paymentType: 'course' | 'books' | 'transport' | 'accessories';
+  paymentType: 'course' | 'books' | 'transport' | 'accessories' | 'left_student';
   term?: number;
   academicYear: string;
   payingCategories?: PayingCategory[];
   payingTerms?: PayingTerm[];
+  leftRecordId?: string;
 }
 
 export default function PaymentGateway() {
@@ -181,14 +182,37 @@ export default function PaymentGateway() {
         course: 'RCP',
         books: 'BKS',
         transport: 'TRN',
-        accessories: 'ACC'
+        accessories: 'ACC',
+        left_student: 'REC'
       };
       const prefix = prefixMap[state.paymentType] || 'RCP';
-      const receiptNumber = `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      let receiptNumber = `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
       // 3. Post to payment collection backend API
       const { data: { session } } = await supabase.auth.getSession();
-      if (state.paymentType === 'course' && state.payingTerms && state.payingTerms.length > 0) {
+      if (state.paymentType === 'left_student') {
+        const response = await fetch(`${getApiBaseUrl()}/api/left-students/collect`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`,
+          },
+          body: JSON.stringify({
+            record_id: state.leftRecordId,
+            amount: state.amount || 0,
+            method: 'UPI',
+            remarks: 'Paid via QR Code Payment Gateway'
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || 'Failed to submit left student payment details.');
+        }
+
+        const result = await response.json();
+        receiptNumber = result.receipt_number;
+      } else if (state.paymentType === 'course' && state.payingTerms && state.payingTerms.length > 0) {
         for (const payingTerm of state.payingTerms) {
           const response = await fetch(`${getApiBaseUrl()}/api/payments/collect`, {
             method: 'POST',
@@ -263,13 +287,17 @@ export default function PaymentGateway() {
       const tableMap = {
         course: 'course_payments',
         books: 'books_payments',
-        transport: 'transport_payments'
+        transport: 'transport_payments',
+        left_student: 'left_student_recovery_payments'
       };
       const tableName = tableMap[state.paymentType];
       if (tableName && receiptUrl) {
+        const updatePayload = state.paymentType === 'left_student'
+          ? { remarks: `Paid via QR. Receipt URL: ${receiptUrl}` }
+          : { notes: `Receipt URL: ${receiptUrl}` };
         await supabase
           .from(tableName)
-          .update({ notes: `Receipt URL: ${receiptUrl}` })
+          .update(updatePayload)
           .eq('receipt_number', receiptNumber);
       }
 

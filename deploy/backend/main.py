@@ -424,6 +424,7 @@ def get_receipt_table_candidates(receipt_type: Optional[str] = None):
         "transport": ("transport_payments", "*, students(full_name, admission_number, father_name, father_phone, mother_name, mother_phone, classes(name))"),
         "accessories": ("student_accessory_payments", "*, students(full_name, admission_number, father_name, father_phone, mother_name, mother_phone, classes(name)), accessory_categories(name)"),
         "accessory": ("accessory_sales", "*, students(full_name, admission_number, father_name, father_phone, mother_name, mother_phone, classes(name)), accessories(item_name)"),
+        "left_student": ("left_student_recovery_payments", "*, left_student_fee_records(pending_term_fee, pending_transport_fee, pending_books_fee, old_due, students(full_name, admission_number, father_name, father_phone, mother_name, mother_phone, classes(name)))"),
     }
 
     if receipt_type:
