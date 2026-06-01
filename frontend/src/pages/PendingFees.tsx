@@ -200,17 +200,17 @@ export default function PendingFees() {
         const booksPaid = booksPaymentMap.get(student.id) || 0;
         const booksPending = student.has_books ? Math.max(0, (student.books_fee || 0) - booksPaid) : 0;
 
-        const paidQuarters = transportPaymentMap.get(student.id) || [];
-        const getElapsedQuarters = (month: number): number[] => {
-          if (month >= 4 && month <= 6) return [1];
-          if (month >= 7 && month <= 9) return [1, 2];
-          if (month >= 10 && month <= 12) return [1, 2, 3];
-          return [1, 2, 3, 4];
+        const paidMonths = transportPaymentMap.get(student.id) || [];
+        const ACADEMIC_MONTHS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3];
+        const getElapsedMonths = (month: number): number[] => {
+          const index = ACADEMIC_MONTHS.indexOf(month);
+          if (index === -1) return [];
+          return ACADEMIC_MONTHS.slice(0, index + 1);
         };
-        const elapsedQuarters = getElapsedQuarters(currentMonth);
-        const pendingQuarters = elapsedQuarters.filter(q => !paidQuarters.includes(q));
+        const elapsedMonths = getElapsedMonths(currentMonth);
+        const pendingMonths = elapsedMonths.filter(m => !paidMonths.includes(m));
         const monthlyFee = student.has_transport ? (student.transport_fee || 0) : 0;
-        const transportPending = pendingQuarters.length * (monthlyFee * 3);
+        const transportPending = pendingMonths.length * monthlyFee;
 
         const accessoriesPaid = accessoriesPaymentMap.get(student.id) || 0;
         const accessoriesAssigned = accessoryFeeMap.get(student.id) || 0;
@@ -231,7 +231,7 @@ export default function PendingFees() {
           booksPending,
           transportPending,
           accessoriesPending,
-          pendingQuarters,
+          pendingMonths,
           totalPending,
           lastPaymentDate: lastPayment ? lastPayment.toISOString() : null,
         };

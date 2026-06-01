@@ -15,6 +15,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { motion } from 'framer-motion';
 
+const MONTH_NAMES: Record<number, string> = {
+  1: 'January', 2: 'February', 3: 'March', 4: 'April',
+  5: 'May', 6: 'June', 7: 'July', 8: 'August',
+  9: 'September', 10: 'October', 11: 'November', 12: 'December'
+};
+
 interface ReceiptData {
     receiptNo: string;
     date: string;
@@ -160,7 +166,7 @@ export default function Receipt() {
                     method: p.payment_method,
                     date: p.payment_date,
                     type: 'transport',
-                    details: p.month && { 1: 'Q1 (Apr-Jun)', 2: 'Q2 (Jul-Sep)', 3: 'Q3 (Oct-Dec)', 4: 'Q4 (Jan-Mar)' }[p.month] ? { 1: 'Q1 (Apr-Jun)', 2: 'Q2 (Jul-Sep)', 3: 'Q3 (Oct-Dec)', 4: 'Q4 (Jan-Mar)' }[p.month]! : 'Transport Fee'
+                    details: p.month && MONTH_NAMES[p.month] ? MONTH_NAMES[p.month] : 'Transport Fee'
                 })),
                 ...(accessorySalesRes.data || []).map(p => ({
                     id: p.id,
@@ -264,7 +270,7 @@ export default function Receipt() {
     const getParticularsName = (type: string | null, data: any) => {
         if (type === 'course') return `Tuition Fee (${data.term === 0 ? 'OLD DUE' : `Term ${data.term}`})`;
         if (type === 'books') return `Books & Accessories Fee`;
-        if (type === 'transport') return `Transport Fee (${data.month && { 1: 'Q1 (Apr-Jun)', 2: 'Q2 (Jul-Sep)', 3: 'Q3 (Oct-Dec)', 4: 'Q4 (Jan-Mar)' }[data.month] ? { 1: 'Q1 (Apr-Jun)', 2: 'Q2 (Jul-Sep)', 3: 'Q3 (Oct-Dec)', 4: 'Q4 (Jan-Mar)' }[data.month] : 'Monthly'})`;
+        if (type === 'transport') return `Transport Fee (${data.month && MONTH_NAMES[data.month] ? MONTH_NAMES[data.month] : 'Monthly'})`;
         if (type === 'accessories') return `Accessories: ${data.accessory_categories?.name || 'FEE'}`;
         if (type === 'accessory') return `Accessory: ${data.accessories?.item_name || 'Item'} (${data.quantity || 1} qty)`;
         return 'Tuition Fee';

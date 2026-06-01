@@ -202,19 +202,15 @@ def get_student_actual_pending_fees(student_id: str, student_data: dict, client:
         expected_books = float(student_data.get("books_fee") or 0.0) if student_data.get("has_books") else 0.0
         pending_books = max(0.0, expected_books - total_books_paid)
         
-        # Expected transport fee to date (based on elapsed quarters in April-March cycle)
+        # Expected transport fee to date (based on elapsed months in April-March cycle)
         current_month = datetime.now(timezone.utc).month
-        if 4 <= current_month <= 6:
-            elapsed_quarters = 1
-        elif 7 <= current_month <= 9:
-            elapsed_quarters = 2
-        elif 10 <= current_month <= 12:
-            elapsed_quarters = 3
+        if current_month >= 4:
+            elapsed_months = current_month - 3
         else:
-            elapsed_quarters = 4
+            elapsed_months = current_month + 9
             
         transport_monthly = float(student_data.get("transport_fee") or 0.0)
-        expected_transport = (transport_monthly * 3.0 * elapsed_quarters) if student_data.get("has_transport") else 0.0
+        expected_transport = (transport_monthly * elapsed_months) if student_data.get("has_transport") else 0.0
         pending_transport = max(0.0, expected_transport - total_transport_paid)
         
         return {
@@ -1083,9 +1079,8 @@ async def collect_payment(request: PaymentCollectionRequest, background_tasks: B
                     )
         elif request.type == "transport":
             transport_monthly = float(student_info.get("transport_fee") or 0.0)
-            quarterly_fee = transport_monthly * 3.0
             
-            # Fetch payments already recorded for this specific quarter (month value 1-4)
+            # Fetch payments already recorded for this specific month (month value 1-12)
             payments_res = admin_client.table("transport_payments")\
                 .select("amount_paid")\
                 .eq("student_id", request.student_id)\
@@ -1094,13 +1089,13 @@ async def collect_payment(request: PaymentCollectionRequest, background_tasks: B
                 .execute()
                 
             paid_so_far = sum(float(p.get("amount_paid") or 0.0) for p in (payments_res.data or []))
-            remaining_due = max(0.0, quarterly_fee - paid_so_far)
+            remaining_due = max(0.0, transport_monthly - paid_so_far)
             
             if request.amount > remaining_due:
                 if request.amount - remaining_due > 0.01:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Payment amount {request.amount} exceeds the remaining pending balance of {remaining_due} for this quarter."
+                        detail=f"Payment amount {request.amount} exceeds the remaining pending balance of {remaining_due} for this month."
                     )
             
         # 2. Prepare data
@@ -1819,14 +1814,9 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
             if students_res.data:
                 batch = []
                 for student in students_res.data:
-                    # Calculate outstanding balance
-                    t1 = float(student.get("term1_fee") or 0.0)
-                    t2 = float(student.get("term2_fee") or 0.0)
-                    t3 = float(student.get("term3_fee") or 0.0)
-                    books = float(student.get("books_fee") or 0.0) if student.get("has_books") else 0.0
-                    transport = float(student.get("transport_fee") or 0.0) if student.get("has_transport") else 0.0
-                    old_dues_curr = float(student.get("old_dues") or 0.0)
-                    new_old_dues = t1 + t2 + t3 + books + transport + old_dues_curr
+                    # Calculate actual outstanding balance
+                    pending_data = get_student_actual_pending_fees(student["id"], student, admin_client)
+                    new_old_dues = pending_data["total"]
                     
                     orig_adm = student.get("admission_number") or f"UNKNOWN-{str(student['id'])[:4]}"
                     new_adm = orig_adm

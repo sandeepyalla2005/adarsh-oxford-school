@@ -68,9 +68,9 @@ interface StudentTransportFee {
   has_transport: boolean;
   transport_fee: number;
   classes?: { name: string };
-  quarterlyFee: number;
-  paidQuarters: number[];
-  pendingQuarters: number[];
+  monthlyFee: number;
+  paidMonths: number[];
+  pendingMonths: number[];
   totalPending: number;
 }
 
@@ -146,38 +146,32 @@ export default function TransportFees() {
         paymentMap.set(p.student_id, existing);
       });
 
-      // Define quarterly mapping
-      const getQuarterFromMonth = (month: number): number => {
-        if (month >= 4 && month <= 6) return 1; // Q1: Apr-Jun
-        if (month >= 7 && month <= 9) return 2; // Q2: Jul-Sep
-        if (month >= 10 && month <= 12) return 3; // Q3: Oct-Dec
-        return 4; // Q4: Jan-Mar
+      // Define academic year months order (Apr-Mar cycle)
+      const ACADEMIC_MONTHS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3];
+      const getElapsedMonths = (month: number): number[] => {
+        const index = ACADEMIC_MONTHS.indexOf(month);
+        if (index === -1) return [];
+        return ACADEMIC_MONTHS.slice(0, index + 1);
       };
 
       const enrichedStudents: StudentTransportFee[] = (studentsData as any[] || []).map(student => {
         // Use student's own transport_fee column (monthly fee)
         const monthlyFee = (student as any).has_transport ? Number((student as any).transport_fee) || 0 : 0;
-        const quarterlyFee = monthlyFee * 3; // Quarterly = 3 months
 
         const paidMonths = paymentMap.get(student.id) || [];
-        const paidQuarters = Array.from(new Set(paidMonths.map(getQuarterFromMonth)));
-
-        // All quarters in current academic year (assuming Apr-Mar cycle)
-        const allQuarters = [1, 2, 3, 4];
-        const pendingQuarters = allQuarters.filter(q => !paidQuarters.includes(q));
-
-        // Only show quarters that are relevant (based on current month)
-        const currentQuarter = getQuarterFromMonth(currentMonth);
-        const relevantPendingQuarters = pendingQuarters.filter(q => q <= currentQuarter);
+        const elapsedMonths = getElapsedMonths(currentMonth);
+        
+        // Find which elapsed months are not paid
+        const pendingMonths = elapsedMonths.filter(m => !paidMonths.includes(m));
 
         return {
           ...student,
           has_transport: (student as any).has_transport || false,
           transport_fee: Number((student as any).transport_fee) || 0,
-          quarterlyFee,
-          paidQuarters,
-          pendingQuarters: relevantPendingQuarters,
-          totalPending: relevantPendingQuarters.length * quarterlyFee,
+          monthlyFee,
+          paidMonths,
+          pendingMonths,
+          totalPending: pendingMonths.length * monthlyFee,
         };
       });
 
@@ -191,19 +185,15 @@ export default function TransportFees() {
 
   const openPaymentDialog = (student: StudentTransportFee) => {
     setSelectedStudent(student);
-    setSelectedMonth(student.pendingQuarters[0]?.toString() || '');
-    setPaymentAmount(student.quarterlyFee.toString());
+    setSelectedMonth(student.pendingMonths[0]?.toString() || '');
+    setPaymentAmount(student.monthlyFee.toString());
     setPaymentMethod('cash');
     setPaymentDialogOpen(true);
   };
 
-  // Define quarter names for display
-  const QUARTERS = [
-    'Q1 (Apr-Jun)',
-    'Q2 (Jul-Sep)',
-    'Q3 (Oct-Dec)',
-    'Q4 (Jan-Mar)'
-  ];
+  const getMonthName = (monthNum: number): string => {
+    return MONTHS[monthNum - 1] || '';
+  };
 
   const handlePayment = async () => {
     if (!selectedStudent || !paymentAmount || !selectedMonth || !user) return;
@@ -218,11 +208,11 @@ export default function TransportFees() {
       return;
     }
 
-    if (payingAmount > selectedStudent.quarterlyFee) {
+    if (payingAmount > selectedStudent.monthlyFee) {
       toast({
         variant: 'destructive',
         title: 'Overpayment Blocked',
-        description: `Payment amount (${formatCurrency(payingAmount)}) cannot exceed the quarterly fee (${formatCurrency(selectedStudent.quarterlyFee)}).`,
+        description: `Payment amount (${formatCurrency(payingAmount)}) cannot exceed the monthly fee (${formatCurrency(selectedStudent.monthlyFee)}).`,
       });
       return;
     }
@@ -300,7 +290,7 @@ export default function TransportFees() {
   };
 
   // Calculate total collected and pending amounts
-  const totalCollected = students.reduce((sum, student) => sum + (student.quarterlyFee * student.paidQuarters.length), 0);
+  const totalCollected = students.reduce((sum, student) => sum + (student.monthlyFee * student.paidMonths.length), 0);
   const totalPending = students.reduce((sum, student) => sum + student.totalPending, 0);
 
   const filteredStudents = students.filter((student) => {
@@ -337,7 +327,7 @@ export default function TransportFees() {
           className="page-header"
         >
           <h1 className="page-title">Transport Fees</h1>
-          <p className="page-description">Manage quarterly transport fee collection</p>
+          <p className="page-description">Manage monthly transport fee collection</p>
         </motion.div>
 
         {/* Fee Category Cards */}
@@ -422,9 +412,9 @@ export default function TransportFees() {
                       <TableHead>Student Name</TableHead>
                       <TableHead>Class</TableHead>
                       <TableHead>Parent Phones</TableHead>
-                      <TableHead className="text-right">Quarterly Fee (3 Months)</TableHead>
-                      <TableHead className="text-center">Paid Quarters</TableHead>
-                      <TableHead className="text-center">Pending Quarters</TableHead>
+                      <TableHead className="text-right">Monthly Fee</TableHead>
+                      <TableHead className="text-center">Paid Months</TableHead>
+                      <TableHead className="text-center">Pending Months</TableHead>
                       <TableHead className="text-right">Total Pending</TableHead>
                       <TableHead className="text-center">Action</TableHead>
                     </TableRow>
@@ -462,19 +452,19 @@ export default function TransportFees() {
                             </div>
                           </TableCell>
                           <TableCell className="text-right font-medium">
-                            {formatCurrency(student.quarterlyFee)}
+                            {formatCurrency(student.monthlyFee)}
                           </TableCell>
                           <TableCell className="text-center">
                             <span className="text-success font-medium">
-                              {student.paidQuarters.length}
+                              {student.paidMonths.length}
                             </span>
                           </TableCell>
                           <TableCell className="text-center">
                             <span className={cn(
                               "font-medium",
-                              student.pendingQuarters.length > 0 ? "text-destructive" : "text-success"
+                              student.pendingMonths.length > 0 ? "text-destructive" : "text-success"
                             )}>
-                              {student.pendingQuarters.length}
+                              {student.pendingMonths.length}
                             </span>
                           </TableCell>
                           <TableCell className="text-right">
@@ -500,7 +490,7 @@ export default function TransportFees() {
                                 }
                                 openPaymentDialog(student);
                               }}
-                              disabled={student.pendingQuarters.length === 0 || isStaff}
+                              disabled={student.pendingMonths.length === 0 || isStaff}
                             >
                               <IndianRupee className="mr-1 h-4 w-4" />
                               Pay
@@ -538,9 +528,9 @@ export default function TransportFees() {
                       <SelectValue placeholder="Select month" />
                     </SelectTrigger>
                     <SelectContent>
-                      {selectedStudent.pendingQuarters.map((quarter) => (
-                        <SelectItem key={quarter} value={quarter.toString()}>
-                          {QUARTERS[quarter - 1]}
+                      {selectedStudent.pendingMonths.map((monthNum) => (
+                        <SelectItem key={monthNum} value={monthNum.toString()}>
+                          {getMonthName(monthNum)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -557,7 +547,7 @@ export default function TransportFees() {
                     placeholder="Enter amount"
                   />
                   <p className="text-sm text-muted-foreground">
-                    Quarterly Fee: {formatCurrency(selectedStudent.quarterlyFee)}
+                    Monthly Fee: {formatCurrency(selectedStudent.monthlyFee)}
                   </p>
                 </div>
 
