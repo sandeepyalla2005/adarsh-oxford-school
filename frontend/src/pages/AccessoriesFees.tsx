@@ -352,6 +352,7 @@ export default function AccessoriesFees() {
       return;
     }
 
+    let lastReceiptNo = '';
     setIsSubmitting(true);
     try {
       // Process payments sequentially via FastAPI
@@ -372,6 +373,11 @@ export default function AccessoriesFees() {
           const errorData = await response.json();
           throw new Error(errorData.detail || 'Payment failed');
         }
+
+        const data = await response.json();
+        if (data && data.receipt_number) {
+          lastReceiptNo = data.receipt_number;
+        }
       }
 
       toast({
@@ -382,8 +388,12 @@ export default function AccessoriesFees() {
       setPaymentDialogOpen(false);
       fetchAllData();
       
-      // Navigate to home dashboard or history
-      navigate(portalPath(portal, '/dashboard'));
+      // Navigate directly to receipt page
+      if (lastReceiptNo) {
+        navigate(`/receipt?receiptNo=${encodeURIComponent(lastReceiptNo)}&type=accessories`);
+      } else {
+        navigate(portalPath(portal, '/dashboard'));
+      }
     } catch (error: any) {
       toast({
         variant: 'destructive',

@@ -384,6 +384,10 @@ export default function LeftStudents() {
       setCollectAmount('');
       setCollectRemarks('');
       refetch();
+
+      if (result.receipt_number) {
+        navigate(`/receipt?receiptNo=${encodeURIComponent(result.receipt_number)}&type=left_student`);
+      }
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Collection Failed', description: err.message });
     } finally {
