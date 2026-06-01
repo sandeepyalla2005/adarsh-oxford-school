@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -103,6 +103,7 @@ export default function CourseFees() {
   });
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isSubmittingRef = useRef(false);
   const [activeCategory, setActiveCategory] = useState<'course' | 'books' | 'transport'>('course');
 
   const classNames = ['all', ...classes.map(c => c.name)];
@@ -294,7 +295,9 @@ export default function CourseFees() {
   };
 
   const handlePayment = async () => {
-    if (!selectedStudent || !user) return;
+    if (!selectedStudent || !user || isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
 
     // Gather terms being paid
     const termsToPay = Object.keys(paymentSelections)
@@ -306,6 +309,8 @@ export default function CourseFees() {
         title: 'Invalid Payment',
         description: 'Select at least one term to pay for.',
       });
+      isSubmittingRef.current = false;
+      setIsSubmitting(false);
       return;
     }
 
@@ -320,6 +325,8 @@ export default function CourseFees() {
           title: 'Invalid Amount',
           description: `Payment amount for ${getTermName(termId)} must be greater than zero.`,
         });
+        isSubmittingRef.current = false;
+        setIsSubmitting(false);
         return;
       }
 
@@ -329,6 +336,8 @@ export default function CourseFees() {
           title: 'Overpayment Blocked',
           description: `Payment amount for ${getTermName(termId)} (${formatCurrency(payingAmount)}) cannot exceed the pending amount (${formatCurrency(pendingAmount)}).`,
         });
+        isSubmittingRef.current = false;
+        setIsSubmitting(false);
         return;
       }
     }
@@ -336,6 +345,8 @@ export default function CourseFees() {
     const totalAmount = termsToPay.reduce((sum, termId) => sum + paymentSelections[termId].amount, 0);
 
     if (paymentMethod === 'qr_code') {
+      isSubmittingRef.current = false;
+      setIsSubmitting(false);
       setPaymentDialogOpen(false);
       
       const payingTerms = termsToPay.map(termId => ({
@@ -357,7 +368,6 @@ export default function CourseFees() {
       return;
     }
 
-    setIsSubmitting(true);
     try {
       const receiptNumber = `RCP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       const { data: { session } } = await supabase.auth.getSession();
@@ -404,6 +414,7 @@ export default function CourseFees() {
         description: error.message,
       });
     } finally {
+      isSubmittingRef.current = false;
       setIsSubmitting(false);
     }
   };
