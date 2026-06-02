@@ -44,6 +44,7 @@ import {
 } from '@/components/ui/dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { FeeCategoryCard } from '@/components/dashboard/FeeCategoryCard';
+import { QrScannerSelect } from '@/components/dashboard/QrScannerSelect';
 import { Badge } from '@/components/ui/badge';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { ClassSlider } from '@/components/dashboard/ClassSlider';
@@ -608,6 +609,8 @@ export default function TransportFees() {
                     </div>
                   </RadioGroup>
                 </div>
+
+                {paymentMethod === 'qr_code' && <QrScannerSelect />}
 
                 <DialogFooter>
                   <DialogClose asChild>

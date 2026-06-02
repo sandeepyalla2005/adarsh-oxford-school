@@ -74,6 +74,9 @@ const AccessoriesFees = lazyWithRetry(() => import("./pages/AccessoriesFees"));
 const PaymentGateway = lazyWithRetry(() => import("./pages/PaymentGateway"));
 const TableRegistryCheck = lazyWithRetry(() => import("./pages/TableRegistryCheck"));
 
+const PublicFeePayment = lazyWithRetry(() => import("./pages/PublicFeePayment"));
+const FeeVerifications = lazyWithRetry(() => import("./pages/admin/FeeVerifications"));
+
 import { queryClient } from "@/lib/query-client";
 
 class AppErrorBoundary extends Component<
@@ -168,6 +171,7 @@ const portalRoutes: PortalRouteDef[] = [
   { path: "/receipt", element: <Receipt />, portals: ["admin", "staff", "fee"] },
   { path: "/db-check", element: <DatabaseCheck />, portals: ["admin"] },
   { path: "/schema-check", element: <TableRegistryCheck />, portals: ["admin"] },
+  { path: "/verifications", element: <FeeVerifications />, portals: ["admin", "fee"] },
 ];
 
 function ProtectedRoute({
@@ -314,6 +318,9 @@ const AppRoutes = ({ mode }: { mode: AppMode }) => {
         {mode === "admin" && <Route path="/admin.html" element={<Navigate to="/" replace />} />}
         {mode === "staff" && <Route path="/staff.html" element={<Navigate to="/" replace />} />}
         {mode === "fee" && <Route path="/fee.html" element={<Navigate to="/" replace />} />}
+        
+        {/* Public Fee Payment Gate */}
+        <Route path="/pay" element={<PublicFeePayment />} />
 
         {/* Dynamic Portal Routes - Generate ALL routes for ALL portals to prevent 404s */}
         {portalRoutes.flatMap((route) => {
