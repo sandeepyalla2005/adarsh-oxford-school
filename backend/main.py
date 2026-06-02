@@ -3520,6 +3520,46 @@ async def get_financial_year_report(year: str, user=Depends(get_current_user)):
                 return "swiping"
             return "cash"
             
+        # Calculate pending dues
+        pending_dues = 0.0
+        try:
+            current_year_res = client.table("school_settings").select("current_academic_year").limit(1).execute()
+            current_year = current_year_res.data[0].get("current_academic_year") if (current_year_res.data and current_year_res.data[0].get("current_academic_year")) else get_current_academic_year()
+            current_fy_start = get_start_year_from_year_str(current_year)
+            
+            if fy_start == current_fy_start:
+                course_expected = books_expected = transport_expected = 0.0
+                res_s = client.table("students").select(
+                    "term1_fee, term2_fee, term3_fee, old_dues, has_books, books_fee, has_transport, transport_fee"
+                ).eq("is_active", True).execute()
+                for s in (res_s.data or []):
+                    course_expected += (
+                        float(s.get("term1_fee") or 0.0)
+                        + float(s.get("term2_fee") or 0.0)
+                        + float(s.get("term3_fee") or 0.0)
+                        + float(s.get("old_dues") or 0.0)
+                    )
+                    if s.get("has_books"):
+                        books_expected += float(s.get("books_fee") or 0.0)
+                    if s.get("has_transport"):
+                        transport_expected += float(s.get("transport_fee") or 0.0) * 12
+                
+                # Fetch all course payments, books payments, and transport payments made FOR the current academic year
+                res_cp = client.table("course_payments").select("amount_paid").eq("academic_year", current_year).execute()
+                res_bp = client.table("books_payments").select("amount_paid").eq("academic_year", current_year).execute()
+                res_tp = client.table("transport_payments").select("amount_paid").eq("academic_year", current_year).execute()
+                
+                col_course = sum(float(p.get("amount_paid") or 0.0) for p in (res_cp.data or []))
+                col_books = sum(float(p.get("amount_paid") or 0.0) for p in (res_bp.data or []))
+                col_transport = sum(float(p.get("amount_paid") or 0.0) for p in (res_tp.data or []))
+                
+                pending_dues = max(0.0, (course_expected + books_expected + transport_expected) - col_course - col_books - col_transport)
+            elif fy_start == current_fy_start - 1:
+                res_s = client.table("students").select("old_dues").eq("is_active", True).execute()
+                pending_dues = sum(float(s.get("old_dues") or 0.0) for s in (res_s.data or []))
+        except Exception as e:
+            logger.error(f"Error calculating pending dues for reports: {e}")
+
         def empty_breakdown():
             return {"total": 0.0, "cash": 0.0, "upi": 0.0, "bank": 0.0, "cards": 0.0, "swiping": 0.0}
             
@@ -3529,7 +3569,8 @@ async def get_financial_year_report(year: str, user=Depends(get_current_user)):
             "previous_year": empty_breakdown(),
             "normal": empty_breakdown(),
             "next_year": empty_breakdown(),
-            "all_splits": {"cash": 0.0, "upi": 0.0, "bank": 0.0, "cards": 0.0, "swiping": 0.0}
+            "all_splits": {"cash": 0.0, "upi": 0.0, "bank": 0.0, "cards": 0.0, "swiping": 0.0},
+            "pending_dues": pending_dues
         }
         
         # Helper to process and aggregate

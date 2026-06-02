@@ -49,6 +49,7 @@ interface FinancialData {
     cards: number;
     swiping: number;
   };
+  pending_dues: number;
 }
 
 export default function FinancialReports() {
@@ -226,8 +227,32 @@ export default function FinancialReports() {
                 </div>
               </motion.div>
 
+              {/* Pending Dues Carry Forward */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="col-span-full md:col-span-2 relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-transparent border border-amber-200 p-8 shadow-md flex flex-col justify-between min-h-[200px]"
+              >
+                <div className="absolute top-0 right-0 h-40 w-40 bg-amber-500/10 rounded-bl-full -mr-12 -mt-12 blur-2xl pointer-events-none" />
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-800">Uncollected Revenue</span>
+                    <h2 className="text-sm font-bold uppercase tracking-wider text-amber-900 mt-1">Pending Dues (Carry-Forward)</h2>
+                  </div>
+                  <div className="h-12 w-12 rounded-2xl bg-amber-100 flex items-center justify-center border border-amber-200">
+                    <AlertCircle className="h-6 w-6 text-amber-700" />
+                  </div>
+                </div>
+                <div className="mt-8">
+                  <p className="text-5xl font-black font-display tracking-tight text-amber-900">{formatCurrency(data.pending_dues)}</p>
+                  <p className="text-xs text-amber-700/80 font-semibold mt-2 leading-relaxed">
+                    Informational: This represents outstanding unpaid fees for this year to be carried forward to the next year. It is not included in the total income.
+                  </p>
+                </div>
+              </motion.div>
+
               {/* Mode Distribution Mini-Grid */}
-              <Card className="col-span-full md:col-span-2 border-none shadow-lg rounded-[2.5rem] bg-white overflow-hidden p-6">
+              <Card className="col-span-full border-none shadow-lg rounded-[2.5rem] bg-white overflow-hidden p-6">
                 <CardHeader className="pb-4 p-0">
                   <CardTitle className="text-lg font-bold text-[#002147]">Payment Mode Overview</CardTitle>
                   <CardDescription>Overall breakdown of the selected financial year income</CardDescription>
