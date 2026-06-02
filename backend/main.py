@@ -630,8 +630,9 @@ def get_class_students(class_name: str, user=Depends(get_current_user)):
 @app.get("/api/receipts/{receipt_no}")
 def get_receipt(receipt_no: str, type: Optional[str] = None, user=Depends(get_current_user)):
     try:
+        client = admin_supabase if admin_supabase is not None else supabase
         for receipt_kind, table_name, select_clause in get_receipt_table_candidates(type):
-            query = supabase.table(table_name).select(select_clause).eq("receipt_number", receipt_no)
+            query = client.table(table_name).select(select_clause).eq("receipt_number", receipt_no)
             response = query.execute()
             if response.data:
                 return response.data

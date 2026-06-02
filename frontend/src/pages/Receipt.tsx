@@ -116,7 +116,6 @@ export default function Receipt() {
             const { data } = await supabase
                 .from('students')
                 .select('id, admission_number, full_name, class_id, classes(name)')
-                .eq('is_active', true)
                 .order('full_name');
             if (data) setStudents(data);
         } catch (err) {
@@ -132,13 +131,15 @@ export default function Receipt() {
                 booksRes,
                 transportRes,
                 accessorySalesRes,
-                studentAccessoryPaymentsRes
+                studentAccessoryPaymentsRes,
+                leftStudentRes
             ] = await Promise.all([
                 supabase.from('course_payments').select('id, receipt_number, amount_paid, payment_method, payment_date, term').eq('student_id', studentId),
                 supabase.from('books_payments').select('id, receipt_number, amount_paid, payment_method, payment_date').eq('student_id', studentId),
                 supabase.from('transport_payments').select('id, receipt_number, amount_paid, payment_method, payment_date, month').eq('student_id', studentId),
                 supabase.from('accessory_sales').select('id, receipt_number, total_amount, payment_method, created_at, accessories(item_name)').eq('student_id', studentId),
-                supabase.from('student_accessory_payments').select('id, receipt_number, amount_paid, payment_method, payment_date, accessory_categories(name)').eq('student_id', studentId)
+                supabase.from('student_accessory_payments').select('id, receipt_number, amount_paid, payment_method, payment_date, accessory_categories(name)').eq('student_id', studentId),
+                supabase.from('left_student_recovery_payments').select('id, receipt_number, amount_paid, payment_method, payment_date, left_student_fee_records!inner(student_id)').eq('left_student_fee_records.student_id', studentId)
             ]);
 
             const all: any[] = [
@@ -186,6 +187,15 @@ export default function Receipt() {
                     date: p.payment_date,
                     type: 'accessories',
                     details: (p.accessory_categories as any)?.name || 'Accessory category'
+                })),
+                ...(leftStudentRes.data || []).map(p => ({
+                    id: p.id,
+                    receiptNo: p.receipt_number,
+                    amount: Number(p.amount_paid),
+                    method: p.payment_method,
+                    date: p.payment_date,
+                    type: 'left_student',
+                    details: 'Left Student Dues Recovery'
                 }))
             ];
 

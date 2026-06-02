@@ -354,6 +354,8 @@ export default function AccessoriesFees() {
 
     setIsSubmitting(true);
     try {
+      const receiptNo = `ACC-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
       // Process payments sequentially via FastAPI
       for (const catId of payingCategories) {
         const response = await apiFetch('/api/payments/accessories', {
@@ -364,6 +366,7 @@ export default function AccessoriesFees() {
             category_id: catId,
             amount_paid: paymentSelections[catId].amount,
             payment_method: paymentMethod,
+            receipt_number: receiptNo,
             remarks: `Payment for ${categories.find(c => c.id === catId)?.name}`
           })
         });
@@ -376,14 +379,14 @@ export default function AccessoriesFees() {
 
       toast({
         title: 'Payment Successful',
-        description: 'All payments recorded via Python Backend.',
+        description: `Recorded payment receipt: ${receiptNo}`,
       });
 
       setPaymentDialogOpen(false);
       fetchAllData();
       
-      // Navigate to home dashboard or history
-      navigate(portalPath(portal, '/dashboard'));
+      // Navigate to the receipt view
+      navigate(`/receipt?receiptNo=${receiptNo}&type=accessories`);
     } catch (error: any) {
       toast({
         variant: 'destructive',

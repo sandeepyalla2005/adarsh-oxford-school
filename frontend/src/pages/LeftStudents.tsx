@@ -168,6 +168,9 @@ export default function LeftStudents() {
       
       refetch();
       queryClient.invalidateQueries({ queryKey: ['left-students-dashboard'] });
+
+      // Redirect directly to receipt view
+      navigate(`/receipt?receiptNo=${result.receipt_number}&type=left_student`);
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Collection Failed', description: err.message });
     } finally {
