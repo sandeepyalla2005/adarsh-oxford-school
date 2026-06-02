@@ -225,6 +225,59 @@ export default function FeeHistory() {
     );
   };
 
+  const handleExportCSV = () => {
+    const headers = ['Receipt No', 'Student Name', 'Fee Type', 'Details', 'Amount (INR)', 'Payment Method', 'Date'];
+    
+    const rows = filteredPayments.map((payment) => {
+      const feeType = payment.fee_type === 'left_student' 
+        ? 'Exit Recovery' 
+        : payment.fee_type.charAt(0).toUpperCase() + payment.fee_type.slice(1);
+        
+      let details = '-';
+      if (payment.term !== undefined && payment.term !== null) {
+        details = payment.term === 0 ? 'Old Due' : `Term ${payment.term}`;
+      } else if (payment.month) {
+        details = MONTHS[payment.month - 1];
+      } else if (payment.item_name) {
+        details = payment.item_name;
+      }
+      
+      const dateStr = format(new Date(payment.payment_date), 'dd MMM yyyy hh:mm a');
+      
+      return [
+        payment.receipt_number,
+        payment.student_name,
+        feeType,
+        details,
+        payment.amount_paid,
+        payment.payment_method,
+        dateStr
+      ];
+    });
+    
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(val => {
+        const cell = String(val).replace(/"/g, '""');
+        return `"${cell}"`;
+      }).join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `fee_history_${format(new Date(), 'yyyyMMdd_HHmmss')}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
   const filteredPayments = payments.filter((payment) => {
     const matchesSearch =
       payment.student_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -285,12 +338,12 @@ export default function FeeHistory() {
             <h1 className="page-title">Fee History</h1>
             <p className="page-description">View and export payment records</p>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline">
+          <div className="flex gap-2 print:hidden">
+            <Button variant="outline" onClick={handleExportCSV}>
               <Download className="mr-2 h-4 w-4" />
               Export
             </Button>
-            <Button variant="outline">
+            <Button variant="outline" onClick={handlePrint}>
               <Printer className="mr-2 h-4 w-4" />
               Print
             </Button>
@@ -342,6 +395,7 @@ export default function FeeHistory() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
+          className="print:hidden"
         >
           <Tabs value={filterPeriod} onValueChange={setFilterPeriod} className="w-full">
             <TabsList>
@@ -443,7 +497,7 @@ export default function FeeHistory() {
                       <TableHead className="text-right">Amount</TableHead>
                       <TableHead>Method</TableHead>
                       <TableHead>Date</TableHead>
-                      <TableHead className="text-center">Receipt</TableHead>
+                      <TableHead className="text-center print:hidden">Receipt</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -482,7 +536,7 @@ export default function FeeHistory() {
                           <TableCell className="text-muted-foreground">
                             {format(new Date(payment.payment_date), 'dd MMM yyyy, hh:mm a')}
                           </TableCell>
-                          <TableCell className="text-center">
+                          <TableCell className="text-center print:hidden">
                             <Button
                               variant="ghost"
                               size="sm"
@@ -500,6 +554,21 @@ export default function FeeHistory() {
             </CardContent>
           </Card>
         </motion.div>
+        <style>{`
+          @media print {
+            * {
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            @page {
+              margin: 15mm 10mm 15mm 10mm;
+            }
+            body {
+              background: white !important;
+              color: black !important;
+            }
+          }
+        `}</style>
       </div>
     </DashboardLayout>
   );

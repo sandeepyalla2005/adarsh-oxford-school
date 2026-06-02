@@ -52,6 +52,7 @@ const adminNavigation = [
       { name: 'Books Fees', path: '/books-fees', icon: BookOpen },
       { name: 'Transport Fees', path: '/transport-fees', icon: Bus },
       { name: 'Accessories', path: '/accessories', icon: ShoppingBag },
+      { name: 'Fee History', path: '/fee-history', icon: History },
       { name: 'Pending Fees', path: '/pending-fees', icon: AlertCircle },
     ]
   },
