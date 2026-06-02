@@ -167,10 +167,25 @@ async def get_current_user(token: HTTPAuthorizationCredentials = Depends(auth_sc
 
 
 def get_current_academic_year(reference_date: Optional[datetime] = None) -> str:
+    if reference_date is None:
+        cached = cache_get("academic_year:current", 60)
+        if cached:
+            return cached
+        try:
+            client = admin_supabase if admin_supabase is not None else supabase
+            res = client.table("school_settings").select("current_academic_year").limit(1).execute()
+            if res.data and res.data[0].get("current_academic_year"):
+                val = res.data[0]["current_academic_year"]
+                cache_set("academic_year:current", val, 60)
+                return val
+        except Exception as e:
+            logger.error(f"Error fetching current academic year from settings: {e}")
+            
     current = reference_date or datetime.now(timezone.utc)
     start_year = current.year if current.month >= 4 else current.year - 1
     end_year_suffix = str((start_year + 1) % 100).zfill(2)
     return f"{start_year}-{end_year_suffix}"
+
 
 
 def get_student_actual_pending_fees(student_id: str, student_data: dict, client: Client) -> dict:
@@ -738,32 +753,34 @@ def refresh_dashboard_stats_task():
         student_accessory_payments = []
         accessory_sales = []
 
+        current_year = get_current_academic_year()
+
         try:
-            res = client.table("course_payments").select("amount_paid, payment_date, payment_method").execute()
+            res = client.table("course_payments").select("amount_paid, payment_date, payment_method").eq("academic_year", current_year).execute()
             course_payments = res.data or []
         except Exception as e:
             logger.error(f"Error fetching course_payments: {e}")
 
         try:
-            res = client.table("books_payments").select("amount_paid, payment_date, payment_method").execute()
+            res = client.table("books_payments").select("amount_paid, payment_date, payment_method").eq("academic_year", current_year).execute()
             books_payments = res.data or []
         except Exception as e:
             logger.error(f"Error fetching books_payments: {e}")
 
         try:
-            res = client.table("transport_payments").select("amount_paid, payment_date, payment_method").execute()
+            res = client.table("transport_payments").select("amount_paid, payment_date, payment_method").eq("academic_year", current_year).execute()
             transport_payments = res.data or []
         except Exception as e:
             logger.error(f"Error fetching transport_payments: {e}")
 
         try:
-            res = client.table("student_accessory_payments").select("amount_paid, payment_date, payment_method").execute()
+            res = client.table("student_accessory_payments").select("amount_paid, payment_date, payment_method").eq("academic_year", current_year).execute()
             student_accessory_payments = res.data or []
         except Exception as e:
             logger.error(f"Error fetching student_accessory_payments: {e}")
 
         try:
-            res = client.table("accessory_sales").select("total_amount, created_at, payment_method").execute()
+            res = client.table("accessory_sales").select("total_amount, created_at, payment_method").eq("academic_year", current_year).execute()
             accessory_sales = res.data or []
         except Exception as e:
             logger.error(f"Error fetching accessory_sales: {e}")
@@ -2650,6 +2667,160 @@ async def update_left_student_details(request: LeftStudentUpdateDetailsRequest, 
         raise
     except Exception as e:
         logger.error(f"Error updating left student details: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+def get_start_year_from_year_str(year_str: str) -> int:
+    if not year_str:
+        return 0
+    if "-" in year_str:
+        parts = year_str.split("-")
+        try:
+            return int(parts[0])
+        except ValueError:
+            return 0
+    else:
+        try:
+            return int(year_str)
+        except ValueError:
+            return 0
+
+@app.get("/api/reports/financial-year")
+async def get_financial_year_report(year: str, user=Depends(get_current_user)):
+    try:
+        user_role = getattr(user, "role", "staff")
+        if user_role not in ["admin", "feeInCharge", "staff"]:
+            raise HTTPException(status_code=403, detail="Not authorized to view financial reports")
+            
+        fy_start = get_start_year_from_year_str(year)
+        if fy_start <= 0:
+            raise HTTPException(status_code=400, detail="Invalid financial year format. Expected YYYY-YY (e.g. 2025-26)")
+            
+        start_date = f"{fy_start}-04-01T00:00:00Z"
+        end_date = f"{fy_start + 1}-03-31T23:59:59Z"
+        
+        client = admin_supabase if admin_supabase is not None else supabase
+        
+        # 1. Fetch payments
+        course_payments = []
+        books_payments = []
+        transport_payments = []
+        student_accessory_payments = []
+        accessory_sales = []
+        left_payments = []
+        
+        try:
+            res = client.table("course_payments").select("amount_paid, payment_date, payment_method, academic_year, term").gte("payment_date", start_date).lte("payment_date", end_date).execute()
+            course_payments = res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching course_payments: {e}")
+            
+        try:
+            res = client.table("books_payments").select("amount_paid, payment_date, payment_method, academic_year").gte("payment_date", start_date).lte("payment_date", end_date).execute()
+            books_payments = res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching books_payments: {e}")
+            
+        try:
+            res = client.table("transport_payments").select("amount_paid, payment_date, payment_method, academic_year").gte("payment_date", start_date).lte("payment_date", end_date).execute()
+            transport_payments = res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching transport_payments: {e}")
+            
+        try:
+            res = client.table("student_accessory_payments").select("amount_paid, payment_date, payment_method, academic_year").gte("payment_date", start_date).lte("payment_date", end_date).execute()
+            student_accessory_payments = res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching student_accessory_payments: {e}")
+            
+        try:
+            res = client.table("accessory_sales").select("total_amount, created_at, payment_method, academic_year").gte("created_at", start_date).lte("created_at", end_date).execute()
+            accessory_sales = res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching accessory_sales: {e}")
+            
+        try:
+            res = client.table("left_student_recovery_payments").select("amount_paid, created_at, payment_method").gte("created_at", start_date).lte("created_at", end_date).execute()
+            left_payments = res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching left recovery payments: {e}")
+
+        # Normalization and breakdown mapping
+        def map_method(m_str):
+            m = (m_str or "").lower()
+            if "cash" in m:
+                return "cash"
+            if "qr" in m or "upi" in m or "scan" in m or "gpay" in m or "phonepe" in m or "scanner" in m:
+                return "upi"
+            if "bank" in m or "transfer" in m or "net" in m:
+                return "bank"
+            if "card" in m:
+                return "cards"
+            if "swip" in m:
+                return "swiping"
+            return "cash"
+            
+        def empty_breakdown():
+            return {"total": 0.0, "cash": 0.0, "upi": 0.0, "bank": 0.0, "cards": 0.0, "swiping": 0.0}
+            
+        results = {
+            "financial_year": year,
+            "total_income": 0.0,
+            "previous_year": empty_breakdown(),
+            "normal": empty_breakdown(),
+            "next_year": empty_breakdown(),
+            "all_splits": {"cash": 0.0, "upi": 0.0, "bank": 0.0, "cards": 0.0, "swiping": 0.0}
+        }
+        
+        # Helper to process and aggregate
+        def process_payment(amount, method, ac_year, term=None, is_left=False):
+            amt = float(amount or 0.0)
+            m_key = map_method(method)
+            
+            # Classification
+            if is_left:
+                classification = "previous_year"
+            elif term == 0:
+                classification = "previous_year"
+            elif ac_year:
+                ac_start = get_start_year_from_year_str(ac_year)
+                if ac_start > 0:
+                    if ac_start < fy_start:
+                        classification = "previous_year"
+                    elif ac_start > fy_start:
+                        classification = "next_year"
+                    else:
+                        classification = "normal"
+                else:
+                    classification = "normal"
+            else:
+                classification = "normal"
+                
+            results["total_income"] += amt
+            results[classification]["total"] += amt
+            results[classification][m_key] += amt
+            results["all_splits"][m_key] += amt
+
+        # Process standard payments
+        for p in course_payments:
+            process_payment(p.get("amount_paid"), p.get("payment_method"), p.get("academic_year"), term=p.get("term"))
+        for p in books_payments:
+            process_payment(p.get("amount_paid"), p.get("payment_method"), p.get("academic_year"))
+        for p in transport_payments:
+            process_payment(p.get("amount_paid"), p.get("payment_method"), p.get("academic_year"))
+        for p in student_accessory_payments:
+            process_payment(p.get("amount_paid"), p.get("payment_method"), p.get("academic_year"))
+        for p in accessory_sales:
+            process_payment(p.get("total_amount"), p.get("payment_method"), p.get("academic_year"))
+        for p in left_payments:
+            process_payment(p.get("amount_paid"), p.get("payment_method"), None, is_left=True)
+            
+        return {"status": "success", "data": results}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Financial year report error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

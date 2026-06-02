@@ -57,6 +57,7 @@ const adminNavigation = [
     ]
   },
   { name: 'Fee Analytics', path: '/fee-analytics', icon: BarChart3, roles: ['admin'] },
+  { name: 'Financial Reports', path: '/financial-reports', icon: BarChart3, roles: ['admin'] },
   { name: 'Audit Logs', path: '/audit', icon: History, roles: ['admin'] },
   { name: 'Notices', path: '/notices', icon: MessageSquare, roles: ['admin'] },
   { name: 'Dropouts Dashboard', path: '/approvals', icon: AlertCircle, roles: ['admin'] },
@@ -77,6 +78,7 @@ const staffNavigation = [
   { name: 'Notices', path: '/notices', icon: MessageSquare, roles: ['staff', 'admin', 'feeInCharge'] },
   { name: 'Schedule', path: '/schedule', icon: CalendarDays, roles: ['staff', 'admin', 'feeInCharge'] },
   { name: 'Academic Calendar', path: '/academic-calendar', icon: CalendarRange, roles: ['staff', 'admin', 'feeInCharge'] },
+  { name: 'Financial Reports', path: '/financial-reports', icon: BarChart3, roles: ['staff', 'admin', 'feeInCharge'] },
   { 
     name: 'Fees Management', 
     icon: Wallet, 
@@ -108,6 +110,7 @@ const feeNavigation = [
       { name: 'Pending Fees', path: '/pending-fees', icon: AlertCircle },
     ]
   },
+  { name: 'Financial Reports', path: '/financial-reports', icon: BarChart3, roles: ['admin', 'feeInCharge'] },
   { name: 'Student Exit Register', path: '/left-students', icon: UserMinus, roles: ['admin', 'feeInCharge'] },
   { name: 'Notices', path: '/notices', icon: MessageSquare, roles: ['admin', 'feeInCharge'] },
   { name: 'Attendance', path: '/attendance', icon: UserCheck, roles: ['admin', 'feeInCharge'] },
