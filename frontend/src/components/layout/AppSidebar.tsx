@@ -22,7 +22,8 @@ import {
   ChevronDown,
   ChevronRight,
   IndianRupee,
-  UserMinus
+  UserMinus,
+  QrCode
 } from 'lucide-react';
 import { useLocation, Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -54,6 +55,7 @@ const adminNavigation = [
       { name: 'Accessories', path: '/accessories', icon: ShoppingBag },
       { name: 'Fee History', path: '/fee-history', icon: History },
       { name: 'Pending Fees', path: '/pending-fees', icon: AlertCircle },
+      { name: 'QR Verifications', path: '/verifications', icon: QrCode },
     ]
   },
   { name: 'Fee Analytics', path: '/fee-analytics', icon: BarChart3, roles: ['admin'] },
@@ -106,6 +108,7 @@ const feeNavigation = [
       { name: 'Accessories', path: '/accessories', icon: ShoppingBag },
       { name: 'Fee History', path: '/fee-history', icon: History },
       { name: 'Pending Fees', path: '/pending-fees', icon: AlertCircle },
+      { name: 'QR Verifications', path: '/verifications', icon: QrCode },
     ]
   },
   { name: 'Student Exit Register', path: '/left-students', icon: UserMinus, roles: ['admin', 'feeInCharge'] },

@@ -299,6 +299,10 @@ def build_receipt_html(
     total_amount: float,
     payment_method: str,
     narration: str,
+    old_due_collected: float = 0.0,
+    current_year_collected: float = 0.0,
+    remaining_old_due: float = 0.0,
+    remaining_current_year_balance: float = 0.0,
 ) -> str:
     """Generate a professional HTML receipt matching the frontend Receipt.tsx design."""
     rows_html = ""
@@ -381,6 +385,27 @@ def build_receipt_html(
         <div style="border-top:1px dashed #94a3b8;margin-top:8px;padding-top:8px;font-size:13px;">
             <strong>Amount In Words :</strong> <em>{amount_words} Rupees Only</em>
         </div>
+    </div>
+
+    <!-- Dues Summary Section -->
+    <div style="margin: 16px 32px; padding: 16px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 13px; color: #334155;">
+        <h4 style="margin: 0 0 8px; font-size: 14px; color: #002147; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Dues Summary</h4>
+        <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+                <td style="padding: 4px 0;"><strong>Old Due Collected:</strong></td>
+                <td style="padding: 4px 0; text-align: right;">₹{old_due_collected:,.2f}</td>
+                <td style="padding: 4px 0; width: 40px;"></td>
+                <td style="padding: 4px 0;"><strong>Remaining Old Due:</strong></td>
+                <td style="padding: 4px 0; text-align: right; color: #dc2626; font-weight: 700;">₹{remaining_old_due:,.2f}</td>
+            </tr>
+            <tr>
+                <td style="padding: 4px 0;"><strong>Current Year Collected:</strong></td>
+                <td style="padding: 4px 0; text-align: right;">₹{current_year_collected:,.2f}</td>
+                <td style="padding: 4px 0; width: 40px;"></td>
+                <td style="padding: 4px 0;"><strong>Remaining Current Balance:</strong></td>
+                <td style="padding: 4px 0; text-align: right; color: #dc2626; font-weight: 700;">₹{remaining_current_year_balance:,.2f}</td>
+            </tr>
+        </table>
     </div>
 
     <!-- Footer -->
@@ -499,11 +524,245 @@ def purge_deleted_students():
     except Exception as e:
         logger.error(f"Error purging deleted students: {e}")
 
-@app.get("/api/students/counts")
-def get_student_counts():
+def log_student_action(
+    student_id: Optional[str],
+    student_name: str,
+    action_type: str,
+    module_name: str,
+    old_values: Optional[dict],
+    new_values: Optional[dict],
+    user
+):
     try:
-        # Trigger purge routine
-        purge_deleted_students()
+        admin_client = get_admin_client()
+        # Fetch performer profile to get name
+        profile_res = admin_client.table("profiles").select("full_name").eq("user_id", user.id).limit(1).execute()
+        performer_name = profile_res.data[0]["full_name"] if profile_res.data else "System/Admin"
+        
+        # Strip internal timestamps and profiles data from old/new values to avoid diffing/bloat errors
+        old_stripped = {k: v for k, v in old_values.items() if k not in ["created_at", "updated_at", "classes"]} if old_values else None
+        new_stripped = {k: v for k, v in new_values.items() if k not in ["created_at", "updated_at", "classes"]} if new_values else None
+        
+        log_data = {
+            "student_id": student_id,
+            "student_name": student_name,
+            "action_type": action_type,
+            "module_name": module_name,
+            "old_values": old_stripped,
+            "new_values": new_stripped,
+            "performed_by": user.id,
+            "performed_by_name": performer_name,
+            "role": getattr(user, "role", "staff"),
+            "created_at": datetime.now().isoformat()
+        }
+        admin_client.table("student_history_logs").insert(log_data).execute()
+    except Exception as e:
+        logger.error(f"Failed to log student action: {e}")
+
+def get_next_academic_year(current_year_str: str) -> str:
+    """Parses an academic year string (e.g. '2025-26') and returns the next academic year (e.g. '2026-27')."""
+    try:
+        parts = current_year_str.split("-")
+        start_year = int(parts[0])
+        next_start = start_year + 1
+        next_end = (next_start + 1) % 100
+        return f"{next_start}-{str(next_end).zfill(2)}"
+    except Exception as e:
+        logger.warning(f"Error parsing academic year '{current_year_str}': {e}. Using fallback.")
+        return "2026-27"
+
+def calculate_student_total_pending_for_promotion(student_id: str, student: dict, client: Client, academic_year: str) -> float:
+    """Calculates a student's total unpaid fees for a given academic year (Course, Old Dues, Books, Transport, Accessories) to set as old_dues for promotion."""
+    try:
+        # Course and Old Dues payments
+        c_res = client.table("course_payments").select("term, amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        course_payments = c_res.data or []
+        t1_paid = sum(float(p["amount_paid"]) for p in course_payments if p["term"] == 1)
+        t2_paid = sum(float(p["amount_paid"]) for p in course_payments if p["term"] == 2)
+        t3_paid = sum(float(p["amount_paid"]) for p in course_payments if p["term"] == 3)
+        old_paid = sum(float(p["amount_paid"]) for p in course_payments if p["term"] == 0)
+
+        t1 = float(student.get("term1_fee") or 0.0)
+        t2 = float(student.get("term2_fee") or 0.0)
+        t3 = float(student.get("term3_fee") or 0.0)
+        old_dues = float(student.get("old_dues") or 0.0)
+
+        pending_course = max(0.0, t1 - t1_paid) + max(0.0, t2 - t2_paid) + max(0.0, t3 - t3_paid)
+        pending_old_dues = max(0.0, old_dues - old_paid)
+
+        # Books payments
+        b_res = client.table("books_payments").select("amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        books_paid = sum(float(p["amount_paid"]) for p in (b_res.data or []))
+        expected_books = float(student.get("books_fee") or 0.0) if student.get("has_books") else 0.0
+        pending_books = max(0.0, expected_books - books_paid)
+
+        # Transport payments
+        tr_res = client.table("transport_payments").select("amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        transport_paid = sum(float(p["amount_paid"]) for p in (tr_res.data or []))
+        expected_transport = float(student.get("transport_fee") or 0.0) if student.get("has_transport") else 0.0
+        pending_transport = max(0.0, expected_transport - transport_paid)
+
+        # Accessories payments
+        acc_fee_res = client.table("student_accessory_fees").select("fee_amount").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        total_acc_fee = sum(float(f["fee_amount"]) for f in (acc_fee_res.data or []))
+        acc_pay_res = client.table("student_accessory_payments").select("amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        total_acc_paid = sum(float(p["amount_paid"]) for p in (acc_pay_res.data or []))
+        pending_accessories = max(0.0, total_acc_fee - total_acc_paid)
+
+        return pending_course + pending_old_dues + pending_books + pending_transport + pending_accessories
+    except Exception as e:
+        logger.error(f"Error in calculate_student_total_pending_for_promotion for student {student_id}: {e}")
+        return 0.0
+
+def get_student_dues_for_left_records(student_id: str, student: dict, client: Client, academic_year: str) -> dict:
+    """Returns details of student pending dues (course, old due, books, transport, accessories) for left student audit records."""
+    try:
+        c_res = client.table("course_payments").select("term, amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        course_payments = c_res.data or []
+        t1_paid = sum(float(p["amount_paid"]) for p in course_payments if p["term"] == 1)
+        t2_paid = sum(float(p["amount_paid"]) for p in course_payments if p["term"] == 2)
+        t3_paid = sum(float(p["amount_paid"]) for p in course_payments if p["term"] == 3)
+        old_paid = sum(float(p["amount_paid"]) for p in course_payments if p["term"] == 0)
+
+        t1 = float(student.get("term1_fee") or 0.0)
+        t2 = float(student.get("term2_fee") or 0.0)
+        t3 = float(student.get("term3_fee") or 0.0)
+        old_dues = float(student.get("old_dues") or 0.0)
+
+        pending_course = max(0.0, t1 - t1_paid) + max(0.0, t2 - t2_paid) + max(0.0, t3 - t3_paid)
+        pending_old_due = max(0.0, old_dues - old_paid)
+
+        # Books payments
+        b_res = client.table("books_payments").select("amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        books_paid = sum(float(p["amount_paid"]) for p in (b_res.data or []))
+        expected_books = float(student.get("books_fee") or 0.0) if student.get("has_books") else 0.0
+        pending_books = max(0.0, expected_books - books_paid)
+
+        # Transport payments
+        tr_res = client.table("transport_payments").select("amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        transport_paid = sum(float(p["amount_paid"]) for p in (tr_res.data or []))
+        expected_transport = float(student.get("transport_fee") or 0.0) if student.get("has_transport") else 0.0
+        pending_transport = max(0.0, expected_transport - transport_paid)
+
+        # Accessories payments
+        acc_fee_res = client.table("student_accessory_fees").select("fee_amount").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        total_acc_fee = sum(float(f["fee_amount"]) for f in (acc_fee_res.data or []))
+        acc_pay_res = client.table("student_accessory_payments").select("amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        total_acc_paid = sum(float(p["amount_paid"]) for p in (acc_pay_res.data or []))
+        pending_accessories = max(0.0, total_acc_fee - total_acc_paid)
+
+        total = pending_course + pending_old_due + pending_books + pending_transport + pending_accessories
+        return {
+            "course": pending_course,
+            "old_due": pending_old_due,
+            "books": pending_books,
+            "transport": pending_transport,
+            "accessories": pending_accessories,
+            "total": total
+        }
+    except Exception as e:
+        logger.error(f"Error in get_student_dues_for_left_records for student {student_id}: {e}")
+        return {"course": 0.0, "old_due": 0.0, "books": 0.0, "transport": 0.0, "accessories": 0.0, "total": 0.0}
+
+def get_student_dues_breakdown(student_id: str, student_data: dict, client: Client, academic_year: str) -> dict:
+    """Returns student's remaining old dues and current year balance for receipt breakdown display."""
+    try:
+        # Course and Old Dues payments
+        c_res = client.table("course_payments").select("term, amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        course_payments = c_res.data or []
+        t1_paid = sum(float(p["amount_paid"]) for p in course_payments if p["term"] == 1)
+        t2_paid = sum(float(p["amount_paid"]) for p in course_payments if p["term"] == 2)
+        t3_paid = sum(float(p["amount_paid"]) for p in course_payments if p["term"] == 3)
+        old_paid = sum(float(p["amount_paid"]) for p in course_payments if p["term"] == 0)
+
+        t1 = float(student_data.get("term1_fee") or 0.0)
+        t2 = float(student_data.get("term2_fee") or 0.0)
+        t3 = float(student_data.get("term3_fee") or 0.0)
+        old_dues = float(student_data.get("old_dues") or 0.0)
+
+        remaining_old_due = max(0.0, old_dues - old_paid)
+        remaining_course = max(0.0, t1 - t1_paid) + max(0.0, t2 - t2_paid) + max(0.0, t3 - t3_paid)
+
+        # Books payments
+        b_res = client.table("books_payments").select("amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        books_paid = sum(float(p["amount_paid"]) for p in (b_res.data or []))
+        expected_books = float(student_data.get("books_fee") or 0.0) if student_data.get("has_books") else 0.0
+        remaining_books = max(0.0, expected_books - books_paid)
+
+        # Transport payments
+        tr_res = client.table("transport_payments").select("amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        transport_paid = sum(float(p["amount_paid"]) for p in (tr_res.data or []))
+        expected_transport = float(student_data.get("transport_fee") or 0.0) if student_data.get("has_transport") else 0.0
+        remaining_transport = max(0.0, expected_transport - transport_paid)
+
+        # Accessories payments
+        acc_fee_res = client.table("student_accessory_fees").select("fee_amount").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        total_acc_fee = sum(float(f["fee_amount"]) for f in (acc_fee_res.data or []))
+        acc_pay_res = client.table("student_accessory_payments").select("amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        total_acc_paid = sum(float(p["amount_paid"]) for p in (acc_pay_res.data or []))
+        remaining_accessories = max(0.0, total_acc_fee - total_acc_paid)
+
+        remaining_current = remaining_course + remaining_books + remaining_transport + remaining_accessories
+
+        return {
+            "remaining_old_due": remaining_old_due,
+            "remaining_current": remaining_current
+        }
+    except Exception as e:
+        logger.error(f"Error in get_student_dues_breakdown for student {student_id}: {e}")
+        return {"remaining_old_due": 0.0, "remaining_current": 0.0}
+
+def calculate_remaining_student_fees(student_id: str, student_data: dict, admin_client: Client) -> tuple[float, float, float, float, float]:
+    t1 = float(student_data.get("term1_fee") or 0.0)
+    t2 = float(student_data.get("term2_fee") or 0.0)
+    t3 = float(student_data.get("term3_fee") or 0.0)
+    books = float(student_data.get("books_fee") or 0.0) if student_data.get("has_books") else 0.0
+    transport = float(student_data.get("transport_fee") or 0.0) if student_data.get("has_transport") else 0.0
+    old_dues = float(student_data.get("old_dues") or 0.0)
+    
+    academic_year = get_current_academic_year()
+    
+    # Course payments
+    try:
+        c_res = admin_client.table("course_payments").select("term, amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        course_payments = c_res.data or []
+        t1_paid = sum(float(p["amount_paid"]) for p in course_payments if p["term"] == 1)
+        t2_paid = sum(float(p["amount_paid"]) for p in course_payments if p["term"] == 2)
+        t3_paid = sum(float(p["amount_paid"]) for p in course_payments if p["term"] == 3)
+        old_paid = sum(float(p["amount_paid"]) for p in course_payments if p["term"] == 0)
+    except Exception as e:
+        logger.error(f"Error querying course payments in calculation: {e}")
+        t1_paid = t2_paid = t3_paid = old_paid = 0.0
+        
+    # Books payments
+    try:
+        b_res = admin_client.table("books_payments").select("amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        books_paid = sum(float(p["amount_paid"]) for p in (b_res.data or []))
+    except Exception as e:
+        logger.error(f"Error querying books payments in calculation: {e}")
+        books_paid = 0.0
+        
+    # Transport payments
+    try:
+        tr_res = admin_client.table("transport_payments").select("amount_paid").eq("student_id", student_id).eq("academic_year", academic_year).execute()
+        transport_paid = sum(float(p["amount_paid"]) for p in (tr_res.data or []))
+    except Exception as e:
+        logger.error(f"Error querying transport payments in calculation: {e}")
+        transport_paid = 0.0
+        
+    rem_t1_t2_t3 = max(0.0, t1 - t1_paid) + max(0.0, t2 - t2_paid) + max(0.0, t3 - t3_paid)
+    rem_transport = max(0.0, transport - transport_paid)
+    rem_books = max(0.0, books - books_paid)
+    rem_old = max(0.0, old_dues - old_paid)
+    
+    total = rem_t1_t2_t3 + rem_transport + rem_books + rem_old
+    return rem_t1_t2_t3, rem_transport, rem_books, rem_old, total
+
+@app.get("/api/students/counts")
+def get_student_counts(background_tasks: BackgroundTasks, user=Depends(get_current_user)):
+    try:
+        # Trigger purge routine in background to keep read request responsive
+        background_tasks.add_task(purge_deleted_students)
 
         cached = cache_get("students:counts", READ_CACHE_TTL_SECONDS)
         if cached is not None:
@@ -555,7 +814,7 @@ def clear_student_cache():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/students")
-def get_students(class_name: Optional[str] = None):
+def get_students(class_name: Optional[str] = None, user=Depends(get_current_user)):
     try:
         cache_key = f"students:{class_name or 'all'}"
         cached = cache_get(cache_key, READ_CACHE_TTL_SECONDS)
@@ -636,22 +895,69 @@ def get_receipt(receipt_no: str, type: Optional[str] = None, user=Depends(get_cu
                 query = admin_client.table(table_name).select(select_clause).eq("receipt_number", receipt_no)
                 response = query.execute()
                 if response.data:
+                    records = response.data
                     # Manually resolve accessory category details if this is student_accessory_payments
                     if table_name == "student_accessory_payments":
-                        cat_ids = list(set(row.get("category_id") for row in response.data if row.get("category_id")))
+                        cat_ids = list(set(row.get("category_id") for row in records if row.get("category_id")))
                         if cat_ids:
                             cat_res = admin_client.table("accessory_categories").select("id, name").in_("id", cat_ids).execute()
                             cat_map = {c["id"]: c["name"] for c in (cat_res.data or [])}
-                            for row in response.data:
+                            for row in records:
                                 cid = row.get("category_id")
                                 if cid and cid in cat_map:
                                     row["accessory_categories"] = {"name": cat_map[cid]}
                                 else:
                                     row["accessory_categories"] = {"name": "Accessory Fee"}
                         else:
-                            for row in response.data:
+                            for row in records:
                                 row["accessory_categories"] = {"name": "Accessory Fee"}
-                    return response.data
+                                
+                    # Calculate collected dues for this receipt
+                    old_due_collected = 0.0
+                    current_year_collected = 0.0
+                    for record in records:
+                        amount = float(record.get("amount_paid") or record.get("total_amount") or 0.0)
+                        if table_name == "course_payments":
+                            if record.get("term") == 0:
+                                old_due_collected += amount
+                            else:
+                                current_year_collected += amount
+                        elif table_name in ["books_payments", "transport_payments", "student_accessory_payments"]:
+                            current_year_collected += amount
+                        elif table_name == "left_student_recovery_payments" or table_name == "left_student_fee_records":
+                            old_due_collected += amount
+                            
+                    # Get student_id and academic_year from first record
+                    first_record = records[0]
+                    student_id = first_record.get("student_id")
+                    academic_year = first_record.get("academic_year")
+                    
+                    remaining_old_due = 0.0
+                    remaining_current = 0.0
+                    
+                    if student_id and academic_year:
+                        student_res = admin_client.table("students").select("*").eq("id", student_id).execute()
+                        if student_res.data:
+                            student_data = student_res.data[0]
+                            breakdown = get_student_dues_breakdown(student_id, student_data, admin_client, academic_year)
+                            remaining_old_due = breakdown.get("remaining_old_due", 0.0)
+                            remaining_current = breakdown.get("remaining_current", 0.0)
+                        else:
+                            left_res = admin_client.table("left_student_fee_records").select("*").eq("student_id", student_id).execute()
+                            if left_res.data:
+                                left_rec = left_res.data[0]
+                                total_pending = float(left_rec.get("total_pending_amount") or 0.0)
+                                recovered = float(left_rec.get("recovered_amount") or 0.0)
+                                remaining_old_due = max(0.0, total_pending - recovered)
+                                remaining_current = 0.0
+
+                    return {
+                        "data": records,
+                        "old_due_collected": old_due_collected,
+                        "current_year_collected": current_year_collected,
+                        "remaining_old_due": remaining_old_due,
+                        "remaining_current_year_balance": remaining_current
+                    }
             except Exception as inner_error:
                 logger.error(f"Error querying table {table_name} for receipt {receipt_no}: {inner_error}")
                 if type:
@@ -1093,6 +1399,8 @@ class PaymentCollectionRequest(BaseModel):
 @app.post("/api/payments/collect")
 async def collect_payment(request: PaymentCollectionRequest, background_tasks: BackgroundTasks, user=Depends(get_current_user)):
     try:
+        if request.amount <= 0:
+            raise HTTPException(status_code=400, detail="Payment amount must be greater than zero.")
         admin_client = get_admin_client()
         
         # 1. Map type to table
@@ -1246,6 +1554,34 @@ async def collect_payment(request: PaymentCollectionRequest, background_tasks: B
             particulars = [{"name": particular_name, "amount": request.amount}]
             narration = f"Fees for {particular_name}"
 
+            # Calculate live dues breakdown for the HTML email receipt
+            old_due_collected = 0.0
+            current_year_collected = 0.0
+            if request.type == "course" and request.term == 0:
+                old_due_collected = float(request.amount)
+            elif request.type == "left_student":
+                old_due_collected = float(request.amount)
+            else:
+                current_year_collected = float(request.amount)
+
+            remaining_old_due = 0.0
+            remaining_current = 0.0
+            
+            # Fetch student details for breakdown
+            st_data_res = admin_client.table("students").select("*").eq("id", request.student_id).execute()
+            if st_data_res.data:
+                st_data = st_data_res.data[0]
+                breakdown = get_student_dues_breakdown(request.student_id, st_data, admin_client, request.academic_year)
+                remaining_old_due = breakdown.get("remaining_old_due", 0.0)
+                remaining_current = breakdown.get("remaining_current", 0.0)
+            else:
+                left_res = admin_client.table("left_student_fee_records").select("*").eq("student_id", request.student_id).execute()
+                if left_res.data:
+                    left_rec = left_res.data[0]
+                    total_pending = float(left_rec.get("total_pending_amount") or 0.0)
+                    recovered = float(left_rec.get("recovered_amount") or 0.0)
+                    remaining_old_due = max(0.0, total_pending - recovered)
+
             receipt_html = build_receipt_html(
                 receipt_no=request.receipt_number,
                 date_str=date_str,
@@ -1257,6 +1593,10 @@ async def collect_payment(request: PaymentCollectionRequest, background_tasks: B
                 total_amount=request.amount,
                 payment_method=request.method,
                 narration=narration,
+                old_due_collected=old_due_collected,
+                current_year_collected=current_year_collected,
+                remaining_old_due=remaining_old_due,
+                remaining_current_year_balance=remaining_current,
             )
 
             plain_text = (
@@ -1321,19 +1661,22 @@ async def create_student_api(student: StudentCreateUpdateRequest, user=Depends(g
         if user_role not in ["admin", "feeInCharge"]:
             raise HTTPException(status_code=403, detail="Not authorized to add students")
             
+        if (student.term1_fee < 0 or student.term2_fee < 0 or student.term3_fee < 0 or
+            student.books_fee < 0 or student.transport_fee < 0 or student.old_dues < 0):
+            raise HTTPException(status_code=400, detail="Fee amounts cannot be negative.")
+            
         admin_client = get_admin_client()
         
-        # Check if admission number already exists in the same class
+        # Check if admission number already exists globally
         existing = admin_client.table("students")\
             .select("id")\
-            .eq("class_id", student.class_id)\
             .eq("admission_number", student.admission_number)\
             .execute()
             
         if existing.data:
             raise HTTPException(
                 status_code=400,
-                detail=f"Admission Number '{student.admission_number}' already exists in the selected class."
+                detail=f"Admission Number '{student.admission_number}' already exists."
             )
             
         student_dict = student.model_dump() if hasattr(student, 'model_dump') else student.dict()
@@ -1343,6 +1686,17 @@ async def create_student_api(student: StudentCreateUpdateRequest, user=Depends(g
         res = admin_client.table("students").insert(student_dict).execute()
         if not res.data:
             raise HTTPException(status_code=500, detail="Failed to create student record")
+            
+        # Log action in backend audit trail
+        log_student_action(
+            student_id=res.data[0]["id"],
+            student_name=student.full_name,
+            action_type="ADD",
+            module_name="Student Info",
+            old_values=None,
+            new_values=student_dict,
+            user=user
+        )
             
         clear_all_caches()
         return {"status": "success", "data": res.data[0]}
@@ -1359,12 +1713,21 @@ async def update_student_api(student_id: str, student: StudentCreateUpdateReques
         if user_role not in ["admin", "feeInCharge"]:
             raise HTTPException(status_code=403, detail="Not authorized to update students")
             
+        if (student.term1_fee < 0 or student.term2_fee < 0 or student.term3_fee < 0 or
+            student.books_fee < 0 or student.transport_fee < 0 or student.old_dues < 0):
+            raise HTTPException(status_code=400, detail="Fee amounts cannot be negative.")
+            
         admin_client = get_admin_client()
         
-        # Check if admission number already exists in another student in the same class
+        # Fetch current record for auditing
+        current_res = admin_client.table("students").select("*").eq("id", student_id).single().execute()
+        if not current_res.data:
+            raise HTTPException(status_code=404, detail="Student not found")
+        old_values = current_res.data
+        
+        # Check if admission number already exists globally
         existing = admin_client.table("students")\
             .select("id")\
-            .eq("class_id", student.class_id)\
             .eq("admission_number", student.admission_number)\
             .neq("id", student_id)\
             .execute()
@@ -1372,13 +1735,24 @@ async def update_student_api(student_id: str, student: StudentCreateUpdateReques
         if existing.data:
             raise HTTPException(
                 status_code=400,
-                detail=f"Admission Number '{student.admission_number}' already exists for another student in the selected class."
+                detail=f"Admission Number '{student.admission_number}' already exists for another student."
             )
             
         student_dict = student.model_dump() if hasattr(student, 'model_dump') else student.dict()
         res = admin_client.table("students").update(student_dict).eq("id", student_id).execute()
         if not res.data:
             raise HTTPException(status_code=404, detail="Student not found or update failed")
+            
+        # Log action in backend audit trail
+        log_student_action(
+            student_id=student_id,
+            student_name=student.full_name,
+            action_type="EDIT",
+            module_name="Student Info",
+            old_values=old_values,
+            new_values=student_dict,
+            user=user
+        )
             
         clear_all_caches()
         return {"status": "success", "data": res.data[0]}
@@ -1439,6 +1813,17 @@ async def mark_student_dropout(student_id: str, request: DropoutConfirmRequest, 
         if not res.data:
             raise HTTPException(status_code=500, detail="Failed to mark student as dropout")
             
+        # Log action in backend audit trail
+        log_student_action(
+            student_id=student_id,
+            student_name=student_data.get("full_name", ""),
+            action_type="UPDATE",
+            module_name="Student Info",
+            old_values={"status": student_data.get("status"), "is_active": student_data.get("is_active")},
+            new_values={"status": "dropout", "is_active": False, "dropout_reason": request.reason},
+            user=user
+        )
+            
         clear_all_caches()
         return {"status": "success", "message": "Student marked as dropout successfully"}
     except HTTPException:
@@ -1455,6 +1840,12 @@ async def restore_student_api(student_id: str, user=Depends(get_current_user)):
             raise HTTPException(status_code=403, detail="Only admins can restore students")
             
         admin_client = get_admin_client()
+        
+        student_res = admin_client.table("students").select("*").eq("id", student_id).single().execute()
+        if not student_res.data:
+            raise HTTPException(status_code=404, detail="Student not found")
+        student_data = student_res.data
+        
         res = admin_client.table("students").update({
             "is_active": True,
             "status": "active",
@@ -1465,6 +1856,17 @@ async def restore_student_api(student_id: str, user=Depends(get_current_user)):
         
         if not res.data:
             raise HTTPException(status_code=404, detail="Student not found or restore failed")
+            
+        # Log action in backend audit trail
+        log_student_action(
+            student_id=student_id,
+            student_name=student_data.get("full_name", ""),
+            action_type="UPDATE",
+            module_name="Student Info",
+            old_values={"status": student_data.get("status"), "is_active": student_data.get("is_active")},
+            new_values={"status": "active", "is_active": True},
+            user=user
+        )
             
         clear_all_caches()
         return {"status": "success", "message": "Student restored successfully"}
@@ -1501,22 +1903,7 @@ async def request_dropout(request: DropoutRequest, user=Depends(get_current_user
             raise HTTPException(status_code=400, detail="Student is already marked as dropout")
 
         # 2. Calculate Pending Fees
-        t1 = float(student_data.get("term1_fee") or 0.0)
-        t2 = float(student_data.get("term2_fee") or 0.0)
-        t3 = float(student_data.get("term3_fee") or 0.0)
-        books = float(student_data.get("books_fee") or 0.0) if student_data.get("has_books") else 0.0
-        transport = float(student_data.get("transport_fee") or 0.0) if student_data.get("has_transport") else 0.0
-        old_dues = float(student_data.get("old_dues") or 0.0)
-        total_pending = t1 + t2 + t3 + books + transport + old_dues
-
-        if total_pending > 0:
-            # Create a left_student_fee_records entry but mark it as pending dropout?
-            # Actually request_dropout is just changing status to 'dropout_pending'.
-            # We will insert into left_student_fee_records once it is APPROVED.
-            # But wait, if they have pending fees, it was blocked before.
-            # Now we just allow it to go to 'dropout_pending'. The actual left_student_fee_records insert will happen when Admin approves it.
-            # So we just remove the block.
-            pass
+        rem_term, rem_transport, rem_books, rem_old, total_pending = calculate_remaining_student_fees(request.student_id, student_data, admin_client)
 
         # 3. Update status to 'dropout_pending'
         res = admin_client.table("students").update({
@@ -1684,7 +2071,6 @@ async def request_dropout(request: DropoutRequest, user=Depends(get_current_user
     except Exception as e:
         logger.error(f"Dropout request error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/api/students/approve-dropout/{student_id}")
 async def approve_dropout(student_id: str, user=Depends(get_current_user)):
     """Allows Admin to finalize a pending dropout request."""
@@ -1738,6 +2124,17 @@ async def approve_dropout(student_id: str, user=Depends(get_current_user)):
         
         if not res.data:
             raise HTTPException(status_code=500, detail="Failed to finalize dropout")
+            
+        # Log action in backend audit trail
+        log_student_action(
+            student_id=student_id,
+            student_name=student_data.get("full_name", ""),
+            action_type="UPDATE",
+            module_name="Student Info",
+            old_values={"status": student_data.get("status"), "is_active": student_data.get("is_active")},
+            new_values={"status": "dropout", "is_active": False, "dropout_reason": clean_reason},
+            user=user
+        )
             
         clear_all_caches()
         return {"status": "success", "message": f"Dropout for {student_data.get('full_name')} has been approved."}
@@ -1821,18 +2218,58 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
                 raise HTTPException(status_code=401, detail="Invalid or expired Admin OTP")
                 
         admin_client = get_admin_client()
-        # Fetch classes ordered by sort_order
+        
+        # 1. Fetch current academic year from school settings
+        settings_res = admin_client.table("school_settings").select("id, current_academic_year").limit(1).execute()
+        if not settings_res.data:
+            raise HTTPException(status_code=400, detail="School settings not configured. Cannot perform promotion.")
+        settings_row = settings_res.data[0]
+        current_year = settings_row["current_academic_year"]
+        target_year = get_next_academic_year(current_year)
+        
+        # 2. Fetch classes ordered by sort_order
         class_res = admin_client.table("classes").select("id, sort_order, name").order("sort_order").execute()
         if not class_res.data:
             raise HTTPException(status_code=400, detail="No classes found to promote students")
             
         classes = class_res.data
+        
+        # 3. Perform proactive validation check for fee structures of target classes
+        active_students_res = admin_client.table("students").select("class_id").eq("is_active", True).execute()
+        active_class_ids = {s["class_id"] for s in (active_students_res.data or []) if s.get("class_id")}
+        
+        destination_classes = {}
+        for idx, cls in enumerate(classes):
+            if cls["id"] in active_class_ids:
+                if idx + 1 < len(classes):
+                    next_cls = classes[idx + 1]
+                    destination_classes[next_cls["id"]] = next_cls["name"]
+                    
+        if destination_classes:
+            fee_struct_res = admin_client.table("fee_structure")\
+                .select("class_id")\
+                .eq("academic_year", target_year)\
+                .in_("class_id", list(destination_classes.keys()))\
+                .execute()
+            configured_destination_class_ids = {row["class_id"] for row in (fee_struct_res.data or [])}
+            missing_class_ids = set(destination_classes.keys()) - configured_destination_class_ids
+            
+            if missing_class_ids:
+                missing_names = sorted([destination_classes[cid] for cid in missing_class_ids])
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Promotion blocked. Fee structure for the target year '{target_year}' is missing for the following classes: {', '.join(missing_names)}."
+                )
+
+        # Fetch accessory categories' default prices
+        cat_res = admin_client.table("accessory_categories").select("id, default_price").eq("is_active", True).execute()
+        category_prices = {c["id"]: float(c["default_price"] or 0.0) for c in (cat_res.data or [])}
+
         promoted = 0
         skipped = 0
         
-        # Look up fee structures for the current academic year
-        current_year = get_current_academic_year()
-        fee_res = admin_client.table("fee_structure").select("*").eq("academic_year", current_year).execute()
+        # Look up fee structures for the target academic year
+        fee_res = admin_client.table("fee_structure").select("*").eq("academic_year", target_year).execute()
         fee_structures = {row["class_id"]: row for row in (fee_res.data or [])}
 
         # Loop in reverse order (highest sort_order to lowest sort_order)
@@ -1849,7 +2286,7 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
                     left_records = []
                     
                     for student in students_res.data:
-                        pending_data = get_student_actual_pending_fees(student["id"], student, admin_client)
+                        pending_data = get_student_dues_for_left_records(student["id"], student, admin_client, current_year)
                         total_pending = pending_data["total"]
                         
                         left_records.append({
@@ -1859,7 +2296,7 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
                             "pending_term_fee": pending_data["course"],
                             "pending_transport_fee": pending_data["transport"],
                             "pending_books_fee": pending_data["books"],
-                            "old_due": 0.0,
+                            "old_due": pending_data["old_due"] + pending_data["accessories"],
                             "total_pending_amount": total_pending,
                             "recovery_status": "UNPAID" if total_pending > 0 else "FULLY_PAID",
                             "recovered_amount": 0.0
@@ -1902,11 +2339,35 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
                 .execute()
                 
             if students_res.data:
+                # Carry over accessories first for this batch
+                student_ids = [student["id"] for student in students_res.data]
+                assignments_res = admin_client.table("student_accessory_fees")\
+                    .select("student_id, category_id")\
+                    .eq("academic_year", current_year)\
+                    .in_("student_id", student_ids)\
+                    .execute()
+                
+                new_assignments = []
+                for assign in (assignments_res.data or []):
+                    cat_id = assign["category_id"]
+                    student_id = assign["student_id"]
+                    default_price = category_prices.get(cat_id, 0.0)
+                    new_assignments.append({
+                        "student_id": student_id,
+                        "category_id": cat_id,
+                        "fee_amount": default_price,
+                        "academic_year": target_year
+                    })
+                if new_assignments:
+                    try:
+                        admin_client.table("student_accessory_fees").insert(new_assignments).execute()
+                    except Exception as e:
+                        logger.warning(f"Could not carry over accessory fees for class {current['name']}: {e}")
+
                 batch = []
                 for student in students_res.data:
-                    # Calculate actual outstanding balance
-                    pending_data = get_student_actual_pending_fees(student["id"], student, admin_client)
-                    new_old_dues = pending_data["total"]
+                    # Calculate actual outstanding balance using correct promotion helper
+                    new_old_dues = calculate_student_total_pending_for_promotion(student["id"], student, admin_client, current_year)
                     
                     orig_adm = student.get("admission_number") or f"UNKNOWN-{str(student['id'])[:4]}"
                     new_adm = orig_adm
@@ -1923,10 +2384,18 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
                     student["term1_fee"] = float(next_fee_struct.get("term1_fee") or 0.0)
                     student["term2_fee"] = float(next_fee_struct.get("term2_fee") or 0.0)
                     student["term3_fee"] = float(next_fee_struct.get("term3_fee") or 0.0)
-                    student["books_fee"] = 0.0
-                    student["has_books"] = False
-                    student["transport_fee"] = 0.0
-                    student["has_transport"] = False
+                    
+                    # Keep has_books/has_transport and update fees based on new class configuration
+                    if student.get("has_books"):
+                        student["books_fee"] = float(next_fee_struct.get("books_fee") or 0.0)
+                    else:
+                        student["books_fee"] = 0.0
+                        
+                    if student.get("has_transport"):
+                        student["transport_fee"] = float(next_fee_struct.get("transport_monthly_fee") or 0.0) * 11
+                    else:
+                        student["transport_fee"] = 0.0
+                        
                     student["updated_at"] = datetime.now().isoformat()
                     
                     batch.append(student)
@@ -1938,6 +2407,9 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
                     admin_client.table("students").upsert(chunk).execute()
                     promoted += len(chunk)
             
+        # 4. Update the current academic year in school settings to target_year
+        admin_client.table("school_settings").update({"current_academic_year": target_year}).eq("id", settings_row["id"]).execute()
+        
         clear_all_caches()
         return {
             "status": "success",
@@ -1949,6 +2421,111 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
         raise
     except Exception as e:
         logger.error(f"Promotion error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class RefreshFeesRequest(BaseModel):
+    student_ids: Optional[list[str]] = None
+    class_id: Optional[str] = None
+
+@app.post("/api/students/refresh-fees")
+async def refresh_student_fees(req: RefreshFeesRequest, user=Depends(get_current_user)):
+    try:
+        user_role = getattr(user, "role", "staff")
+        if user_role not in ["admin", "feeInCharge"]:
+            raise HTTPException(status_code=403, detail="Not authorized to refresh student fees")
+            
+        admin_client = get_admin_client()
+        
+        # Fetch current academic year from settings
+        settings_res = admin_client.table("school_settings").select("id, current_academic_year").limit(1).execute()
+        if not settings_res.data:
+            raise HTTPException(status_code=400, detail="School settings not configured.")
+        current_year = settings_res.data[0]["current_academic_year"]
+        
+        # Load fee structures for current year
+        fee_res = admin_client.table("fee_structure").select("*").eq("academic_year", current_year).execute()
+        fee_structures = {row["class_id"]: row for row in (fee_res.data or [])}
+        
+        # Fetch accessory categories' default prices
+        cat_res = admin_client.table("accessory_categories").select("id, default_price").eq("is_active", True).execute()
+        category_prices = {c["id"]: float(c["default_price"] or 0.0) for c in (cat_res.data or [])}
+        
+        # Query active students based on filter
+        query = admin_client.table("students").select("*").eq("is_active", True)
+        if req.student_ids:
+            query = query.in_("id", req.student_ids)
+        elif req.class_id:
+            query = query.eq("class_id", req.class_id)
+            
+        students_res = query.execute()
+        if not students_res.data:
+            return {"status": "success", "message": "No students to refresh", "refreshed": 0}
+            
+        students = students_res.data
+        batch = []
+        
+        # Refresh student accessory fees in bulk/loop
+        student_ids = [s["id"] for s in students]
+        
+        # Update existing student_accessory_fees assignments for current year
+        assignments_res = admin_client.table("student_accessory_fees")\
+            .select("id, student_id, category_id")\
+            .eq("academic_year", current_year)\
+            .in_("student_id", student_ids)\
+            .execute()
+            
+        acc_updates = []
+        for assign in (assignments_res.data or []):
+            cat_id = assign["category_id"]
+            if cat_id in category_prices:
+                acc_updates.append({
+                    "id": assign["id"],
+                    "student_id": assign["student_id"],
+                    "category_id": cat_id,
+                    "fee_amount": category_prices[cat_id],
+                    "academic_year": current_year
+                })
+                
+        if acc_updates:
+            admin_client.table("student_accessory_fees").upsert(acc_updates).execute()
+            
+        # Refresh student class fees
+        for student in students:
+            cls_id = student["class_id"]
+            fee_struct = fee_structures.get(cls_id, {})
+            
+            student["term1_fee"] = float(fee_struct.get("term1_fee") or 0.0)
+            student["term2_fee"] = float(fee_struct.get("term2_fee") or 0.0)
+            student["term3_fee"] = float(fee_struct.get("term3_fee") or 0.0)
+            
+            if student.get("has_books"):
+                student["books_fee"] = float(fee_struct.get("books_fee") or 0.0)
+            else:
+                student["books_fee"] = 0.0
+                
+            if student.get("has_transport"):
+                student["transport_fee"] = float(fee_struct.get("transport_monthly_fee") or 0.0) * 11
+            else:
+                student["transport_fee"] = 0.0
+                
+            student["updated_at"] = datetime.now().isoformat()
+            batch.append(student)
+            
+        # Bulk upsert students
+        chunk_size = 500
+        for j in range(0, len(batch), chunk_size):
+            chunk = batch[j:j+chunk_size]
+            admin_client.table("students").upsert(chunk).execute()
+            
+        clear_all_caches()
+        return {
+            "status": "success",
+            "message": f"Successfully refreshed fee structures for {len(batch)} students.",
+            "refreshed": len(batch)
+        }
+    except Exception as e:
+        logger.error(f"Refresh fees error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -2069,30 +2646,30 @@ async def forgot_password(request: ForgotPasswordRequest):
     try:
         admin_client = get_admin_client()
         normalized_email = normalize_email(request.email)
-
+ 
         # Enforce that admin recovery is locked to specific emails
-        is_sandeep_admin = normalized_email.startswith("sandeep.yalla506@gmail")
-        is_main_admin = normalized_email.startswith("admin@adarshoxford.com")
+        is_sandeep_admin = normalized_email == "sandeep.yalla506@gmail.com"
+        is_main_admin = normalized_email == "admin@adarshoxford.com"
         if not (is_sandeep_admin or is_main_admin):
             raise HTTPException(status_code=403, detail="Password recovery is only allowed for authorized admin emails.")
-
+ 
         # Enforce that feeInCharge recovery is locked to the specific two emails
         if request.role == "feeInCharge":
-            is_sandeep = normalized_email.startswith("sandeep.yalla506@gmail")
-            is_schooloxford = normalized_email.startswith("schooloxford2005@gmail")
+            is_sandeep = normalized_email == "sandeep.yalla506@gmail.com"
+            is_schooloxford = normalized_email == "schooloxford2005@gmail.com"
             if not (is_sandeep or is_schooloxford):
                 raise HTTPException(status_code=403, detail="Password recovery is only allowed for authorized fee in-charge emails.")
-
+ 
         user_res = admin_client.table("profiles").select("user_id, email").ilike("email", normalized_email).limit(1).execute()
         if not user_res.data:
             raise HTTPException(status_code=404, detail="User with this email not found")
-
+ 
         logger.info(f"Password reset requested for {normalized_email}")
         user_row = user_res.data[0]
         otp = f"{secrets.randbelow(900000) + 100000}"
         salt = secrets.token_hex(16)
         expires_at = datetime.now() + timedelta(minutes=10)
-
+ 
         admin_client.table("wipe_requests").delete().eq("user_id", user_row["user_id"]).eq("operation_type", "password_reset").execute()
         insert_res = admin_client.table("wipe_requests").insert({
             "user_id": user_row["user_id"],
@@ -2102,7 +2679,7 @@ async def forgot_password(request: ForgotPasswordRequest):
             "expires_at": expires_at.isoformat(),
             "plain_otp": None,  # SECURITY: Never store plaintext OTP in DB; OTP is sent via email only
         }).execute()
-
+ 
         if not insert_res.data:
             raise HTTPException(status_code=500, detail="Failed to create password reset token")
 
@@ -2124,15 +2701,15 @@ async def reset_password(request: ResetPasswordRequest):
 
         # Enforce that admin password reset is locked to specific emails
         if request.role == "admin":
-            is_sandeep_admin = normalized_email.startswith("sandeep.yalla506@gmail")
-            is_main_admin = normalized_email.startswith("admin@adarshoxford.com")
+            is_sandeep_admin = normalized_email == "sandeep.yalla506@gmail.com"
+            is_main_admin = normalized_email == "admin@adarshoxford.com"
             if not (is_sandeep_admin or is_main_admin):
                 raise HTTPException(status_code=403, detail="Password reset is only allowed for authorized admin emails.")
 
         # Enforce that feeInCharge password reset is locked to the specific two emails
         if request.role == "feeInCharge":
-            is_sandeep = normalized_email.startswith("sandeep.yalla506@gmail")
-            is_schooloxford = normalized_email.startswith("schooloxford2005@gmail")
+            is_sandeep = normalized_email == "sandeep.yalla506@gmail.com"
+            is_schooloxford = normalized_email == "schooloxford2005@gmail.com"
             if not (is_sandeep or is_schooloxford):
                 raise HTTPException(status_code=403, detail="Password reset is only allowed for authorized fee in-charge emails.")
 
@@ -2678,6 +3255,106 @@ async def get_left_students_dashboard(user=Depends(get_current_user)):
         }
     except Exception as e:
         logger.error(f"Error fetching left students dashboard: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class QRPaymentSubmitRequest(BaseModel):
+    student_name: str
+    admission_number: str
+    class_name: str
+    parent_name: Optional[str] = None
+    mobile_number: Optional[str] = None
+    amount: float
+    screenshot_url: Optional[str] = None
+    preferred_qr: Optional[str] = None
+
+class QRPaymentVerifyRequest(BaseModel):
+    status: str
+    rejection_reason: Optional[str] = None
+
+@app.post("/api/public-payments/submit")
+async def submit_qr_payment(request: QRPaymentSubmitRequest):
+    try:
+        client = admin_supabase if admin_supabase is not None else supabase
+        payment_data = {
+            "student_name": request.student_name,
+            "admission_number": request.admission_number,
+            "class_name": request.class_name,
+            "parent_name": request.parent_name,
+            "mobile_number": request.mobile_number,
+            "amount": request.amount,
+            "screenshot_url": request.screenshot_url,
+            "preferred_qr": request.preferred_qr,
+            "status": "Awaiting Verification"
+        }
+        
+        response = client.table("qr_fee_payments").insert(payment_data).execute()
+        if not response.data:
+            raise HTTPException(status_code=500, detail="Failed to record QR payment")
+            
+        return {"status": "success", "data": response.data[0]}
+    except Exception as e:
+        logger.error(f"Error submitting QR payment: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/public-payments/all")
+async def get_all_qr_payments(user=Depends(get_current_user)):
+    try:
+        if user.role not in ['admin', 'feeInCharge']:
+            raise HTTPException(status_code=403, detail="Not authorized")
+            
+        client = admin_supabase if admin_supabase is not None else supabase
+        response = client.table("qr_fee_payments").select("*").order("created_at", desc=True).execute()
+        return {"status": "success", "data": response.data or []}
+    except Exception as e:
+        logger.error(f"Error fetching QR payments: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/public-payments/{payment_id}")
+async def get_qr_payment(payment_id: str):
+    try:
+        client = admin_supabase if admin_supabase is not None else supabase
+        res = client.table("qr_fee_payments").select("*").eq("id", payment_id).single().execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="QR payment record not found")
+        return {"status": "success", "data": res.data}
+    except Exception as e:
+        logger.error(f"Error fetching single QR payment: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/public-payments/verify/{payment_id}")
+async def verify_qr_payment(payment_id: str, request: QRPaymentVerifyRequest, user=Depends(get_current_user)):
+    try:
+        if user.role not in ['admin', 'feeInCharge']:
+            raise HTTPException(status_code=403, detail="Not authorized")
+            
+        client = admin_supabase if admin_supabase is not None else supabase
+        
+        # 1. Fetch current payment record
+        res = client.table("qr_fee_payments").select("*").eq("id", payment_id).single().execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="QR payment record not found")
+            
+        update_data = {
+            "status": request.status,
+            "updated_at": datetime.now().isoformat()
+        }
+        
+        if request.status == "Approved":
+            receipt_no = f"OXF-QR-{datetime.now().strftime('%y%m%d%H%M%S')}"
+            update_data["receipt_number"] = receipt_no
+        elif request.status == "Rejected":
+            update_data["rejection_reason"] = request.rejection_reason or "Payment could not be verified."
+        else:
+            raise HTTPException(status_code=400, detail="Invalid verification status")
+            
+        client.table("qr_fee_payments").update(update_data).eq("id", payment_id).execute()
+        clear_all_caches()
+        return {"status": "success", "data": update_data}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error verifying QR payment: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

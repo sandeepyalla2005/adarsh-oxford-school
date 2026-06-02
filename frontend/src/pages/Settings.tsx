@@ -11,7 +11,8 @@ import {
   Upload,
   Download,
   UsersRound,
-  ArrowRight
+  ArrowRight,
+  RefreshCw
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
@@ -58,6 +59,7 @@ export default function Settings() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPromoting, setIsPromoting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isCreatingStaff, setIsCreatingStaff] = useState(false);
   const [showOtpDialog, setShowOtpDialog] = useState(false);
   const [promoteOtp, setPromoteOtp] = useState('');
@@ -251,6 +253,46 @@ export default function Settings() {
       });
     } finally {
       setIsPromoting(false);
+    }
+  };
+
+  const handleRefreshFees = async () => {
+    if (userRole === 'staff') {
+      toast({
+        variant: 'destructive',
+        title: 'Permission Denied',
+        description: 'Staff users cannot refresh fee structures.',
+      });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'Are you sure you want to refresh fee structures for all active students? This will reapply configured class fees and accessories defaults for the current academic year without affecting old dues or payment history.'
+    );
+    if (!confirmed) return;
+
+    setIsRefreshing(true);
+    try {
+      const resp = await apiFetch('/api/students/refresh-fees', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || 'Refresh failed');
+
+      toast({
+        title: 'Refreshed Successfully',
+        description: data.message || `Successfully refreshed fee structures.`,
+      });
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Refresh Failed',
+        description: error.message || 'Failed to refresh fee structures',
+      });
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -599,6 +641,37 @@ export default function Settings() {
               >
                 <ArrowRight className="mr-2 h-4 w-4" />
                 {isPromoting ? 'Promoting...' : isStaff ? 'Promote (Admin only)' : 'Promote Students'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="card-elevated">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <RefreshCw className="h-5 w-5 text-primary" />
+              Refresh Fee Structures
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div className="space-y-1">
+                <p className="font-medium text-foreground">
+                  Update active student profiles with current class fee structures
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  This will re-calculate and re-apply current Course, Book, Transport, and Accessories fees based on configured class defaults for the active academic year.
+                  Existing old dues, payment records, and historic receipts will be fully preserved.
+                </p>
+              </div>
+              <Button
+                type="button"
+                className="btn-oxford"
+                onClick={handleRefreshFees}
+                disabled={isRefreshing || isStaff}
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                {isRefreshing ? 'Refreshing...' : isStaff ? 'Refresh (Admin only)' : 'Refresh Fee Structures'}
               </Button>
             </div>
           </CardContent>

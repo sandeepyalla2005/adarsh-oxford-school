@@ -34,6 +34,10 @@ interface ReceiptData {
     totalAmount: number;
     paymentMode: string;
     narration?: string;
+    oldDueCollected?: number;
+    currentYearCollected?: number;
+    remainingOldDue?: number;
+    remainingCurrentYearBalance?: number;
 }
 
 export default function Receipt() {
@@ -224,6 +228,12 @@ export default function Receipt() {
             const records = Array.isArray(paymentData) ? paymentData : (paymentData?.data || []);
             if (!records || records.length === 0) throw new Error("Receipt not found");
 
+            // Extract dues details returned by wrapper
+            const oldDueCollected = Number(paymentData?.old_due_collected || 0);
+            const currentYearCollected = Number(paymentData?.current_year_collected || 0);
+            const remainingOldDue = Number(paymentData?.remaining_old_due || 0);
+            const remainingCurrentYearBalance = Number(paymentData?.remaining_current_year_balance || 0);
+
             // Use the first record for common details
             const record = records[0] as any;
 
@@ -259,7 +269,11 @@ export default function Receipt() {
                 particulars: particulars,
                 totalAmount: totalAmount,
                 paymentMode: formatPaymentMode(record.payment_method),
-                narration: (record.notes?.includes('Receipt URL') || record.remarks?.includes('Receipt URL')) ? `Fee payment received. Receipt verified.` : `Fee payment received.`
+                narration: (record.notes?.includes('Receipt URL') || record.remarks?.includes('Receipt URL')) ? `Fee payment received. Receipt verified.` : `Fee payment received.`,
+                oldDueCollected: oldDueCollected,
+                currentYearCollected: currentYearCollected,
+                remainingOldDue: remainingOldDue,
+                remainingCurrentYearBalance: remainingCurrentYearBalance
             };
 
             setData(receiptDataObj);
@@ -661,6 +675,32 @@ export default function Receipt() {
                     <div className="p-2.5 flex flex-col justify-between">
                         <span className="text-slate-600 block text-[10px] uppercase tracking-wider mb-1">Grand Total</span>
                         <span className="text-base md:text-lg font-black text-slate-900">₹{data.totalAmount.toFixed(2)}</span>
+                    </div>
+                </div>
+
+                {/* Dues Summary Section */}
+                <div className="w-full border border-slate-800 text-[10px] md:text-xs font-bold text-slate-800 mb-6 bg-slate-50/30">
+                    <div className="border-b border-slate-800 p-2 bg-slate-100/50 flex justify-between items-center">
+                        <span className="text-[9px] uppercase tracking-wider text-slate-700">Dues Summary Balance</span>
+                        <span className="text-[8px] bg-slate-700 text-white px-1.5 py-0.5 rounded font-black tracking-widest uppercase">Live Status</span>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 divide-y md:divide-y-0 divide-x divide-slate-800 border-slate-800">
+                        <div className="p-2 flex flex-col justify-between">
+                            <span className="text-slate-600 text-[8px] uppercase tracking-wider mb-0.5">Old Due Collected</span>
+                            <span className="text-xs font-bold text-slate-800">₹{(data.oldDueCollected || 0).toFixed(2)}</span>
+                        </div>
+                        <div className="p-2 flex flex-col justify-between">
+                            <span className="text-slate-600 text-[8px] uppercase tracking-wider mb-0.5">Current Year Collected</span>
+                            <span className="text-xs font-bold text-slate-800">₹{(data.currentYearCollected || 0).toFixed(2)}</span>
+                        </div>
+                        <div className="p-2 flex flex-col justify-between bg-red-50/10">
+                            <span className="text-red-700 text-[8px] uppercase tracking-wider mb-0.5">Remaining Old Due</span>
+                            <span className="text-xs font-black text-red-700">₹{(data.remainingOldDue || 0).toFixed(2)}</span>
+                        </div>
+                        <div className="p-2 flex flex-col justify-between bg-red-50/10">
+                            <span className="text-red-700 text-[8px] uppercase tracking-wider mb-0.5">Remaining Current Year</span>
+                            <span className="text-xs font-black text-red-700">₹{(data.remainingCurrentYearBalance || 0).toFixed(2)}</span>
+                        </div>
                     </div>
                 </div>
 
