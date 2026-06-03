@@ -2541,6 +2541,8 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
                     student["term1_fee"] = float(next_fee_struct.get("term1_fee") or 0.0)
                     student["term2_fee"] = float(next_fee_struct.get("term2_fee") or 0.0)
                     student["term3_fee"] = float(next_fee_struct.get("term3_fee") or 0.0)
+                    student["fine_amount"] = 0.0
+                    student["misc_charges"] = 0.0
                     
                     # Keep has_books/has_transport and update fees based on new class configuration
                     if student.get("has_books"):
