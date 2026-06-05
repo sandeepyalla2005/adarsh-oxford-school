@@ -2422,6 +2422,18 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
         cat_res = admin_client.table("accessory_categories").select("id, default_price").eq("is_active", True).execute()
         category_prices = {c["id"]: float(c["default_price"] or 0.0) for c in (cat_res.data or [])}
 
+        # Check if fine_amount and misc_charges columns exist in the database table
+        has_fine_amount = False
+        has_misc_charges = False
+        try:
+            test_res = admin_client.table("students").select("*").limit(1).execute()
+            if test_res.data:
+                cols = test_res.data[0].keys()
+                has_fine_amount = "fine_amount" in cols
+                has_misc_charges = "misc_charges" in cols
+        except Exception as e:
+            logger.warning(f"Error checking student columns in promote_students: {e}")
+
         promoted = 0
         skipped = 0
         
@@ -2541,8 +2553,15 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
                     student["term1_fee"] = float(next_fee_struct.get("term1_fee") or 0.0)
                     student["term2_fee"] = float(next_fee_struct.get("term2_fee") or 0.0)
                     student["term3_fee"] = float(next_fee_struct.get("term3_fee") or 0.0)
-                    student["fine_amount"] = 0.0
-                    student["misc_charges"] = 0.0
+                    if has_fine_amount:
+                        student["fine_amount"] = 0.0
+                    elif "fine_amount" in student:
+                        del student["fine_amount"]
+                        
+                    if has_misc_charges:
+                        student["misc_charges"] = 0.0
+                    elif "misc_charges" in student:
+                        del student["misc_charges"]
                     
                     # Keep has_books/has_transport and update fees based on new class configuration
                     if student.get("has_books"):
@@ -2701,7 +2720,25 @@ async def delete_student(student_id: str, req: DeleteStudentRequest, user=Depend
         admin_client = get_admin_client()
         
         # 1. Fetch student details to verify pending fees
-        student_res = admin_client.table("students").select("id, full_name, term1_fee, term2_fee, term3_fee, old_dues, books_fee, transport_fee, has_books, has_transport, fine_amount, misc_charges").eq("id", student_id).single().execute()
+        # Check if fine_amount and misc_charges exist in database dynamically
+        has_fine_amount = False
+        has_misc_charges = False
+        try:
+            test_res = admin_client.table("students").select("*").limit(1).execute()
+            if test_res.data:
+                cols = test_res.data[0].keys()
+                has_fine_amount = "fine_amount" in cols
+                has_misc_charges = "misc_charges" in cols
+        except Exception:
+            pass
+
+        select_cols = "id, full_name, term1_fee, term2_fee, term3_fee, old_dues, books_fee, transport_fee, has_books, has_transport"
+        if has_fine_amount:
+            select_cols += ", fine_amount"
+        if has_misc_charges:
+            select_cols += ", misc_charges"
+
+        student_res = admin_client.table("students").select(select_cols).eq("id", student_id).single().execute()
         if not student_res.data:
             raise HTTPException(status_code=404, detail="Student not found")
             
