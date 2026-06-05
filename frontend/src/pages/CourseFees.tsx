@@ -561,6 +561,7 @@ export default function CourseFees() {
 
                       <TableHead>Parent Phones</TableHead>
                       <TableHead className="text-right">Total Fee</TableHead>
+                      <TableHead className="text-center">Old Due</TableHead>
                       <TableHead className="text-center">Term 1</TableHead>
                       <TableHead className="text-center">Term 2</TableHead>
                       <TableHead className="text-center">Term 3</TableHead>
@@ -571,7 +572,7 @@ export default function CourseFees() {
                   <TableBody>
                     {isLoading ? (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center py-12">
+                        <TableCell colSpan={10} className="text-center py-12">
                           <div className="flex items-center justify-center">
                             <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
                           </div>
@@ -579,7 +580,7 @@ export default function CourseFees() {
                       </TableRow>
                     ) : filteredStudents.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center py-12 text-muted-foreground">
+                        <TableCell colSpan={10} className="text-center py-12 text-muted-foreground">
                           No students found
                         </TableCell>
                       </TableRow>
@@ -602,6 +603,24 @@ export default function CourseFees() {
                           </TableCell>
                           <TableCell className="text-right font-medium">
                             {formatCurrency(student.totalFee)}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <div className="flex flex-col items-center gap-1.5 min-w-[80px]">
+                              <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">Total: {formatCurrency(student.old_dues)}</span>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "w-full justify-center",
+                                  getTermStatus(student.oldDuesPaid, student.old_dues) === 'success' && 'badge-success',
+                                  getTermStatus(student.oldDuesPaid, student.old_dues) === 'warning' && 'badge-warning'
+                                )}
+                              >
+                                {formatCurrency(student.oldDuesPaid)}
+                              </Badge>
+                              {student.old_dues - student.oldDuesPaid > 0 && (
+                                <span className="text-[10px] text-destructive font-bold uppercase tracking-tight">Due: {formatCurrency(student.old_dues - student.oldDuesPaid)}</span>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell className="text-center">
                             <div className="flex flex-col items-center gap-1.5 min-w-[80px]">
