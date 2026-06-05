@@ -35,7 +35,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
-import { getCurrentAcademicYear } from '@/lib/academic-year';
+import { useAcademicYear } from '@/contexts/AcademicYearContext';
 
 const MONTHS = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -63,7 +63,7 @@ export default function PendingFees() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 50;
 
-  const academicYear = getCurrentAcademicYear();
+  const { currentAcademicYear: academicYear } = useAcademicYear();
 
   useEffect(() => {
     fetchClasses();
@@ -72,7 +72,7 @@ export default function PendingFees() {
   useEffect(() => {
     fetchPendingData();
     setCurrentPage(1); // Reset pagination when filters change
-  }, [activeTab, selectedClass]);
+  }, [activeTab, selectedClass, academicYear]);
 
   const fetchClasses = async () => {
     const { data } = await supabase

@@ -62,14 +62,17 @@ interface IncomeBreakdown {
 }
 
 import StaffDashboard from './staff/StaffDashboard';
+import { useAcademicYear } from '@/contexts/AcademicYearContext';
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const location = useLocation();
   const portal = getCurrentPortal(location.pathname);
   const { user, userRole, profile, isLoading: authLoading, signOut } = useAuth();
+  const { currentAcademicYear } = useAcademicYear();
 
   // --- All state hooks must be declared before any conditional returns ---
+  const [academicYear, setAcademicYear] = useState<string>('');
   const [selectedTimeRange, setSelectedTimeRange] = useState<'today' | 'week' | 'month'>('today');
   const [selectedCategory, setSelectedCategory] = useState<'All' | 'Course' | 'Books' | 'Transport' | 'Accessory'>('All');
   const [stats, setStats] = useState({
@@ -170,6 +173,9 @@ export default function Dashboard() {
 
         if (data.categoryBreakdowns) {
           setCategoryBreakdowns(data.categoryBreakdowns);
+        }
+        if (data.academicYear) {
+          setAcademicYear(data.academicYear);
         }
         
         setLastUpdated(new Date(data.lastUpdated));
@@ -299,7 +305,12 @@ export default function Dashboard() {
                 )}
               </div>
               <div>
-                <h1 className="page-title">Dashboard</h1>
+                <div className="flex items-center gap-3">
+                  <h1 className="page-title">Dashboard</h1>
+                  <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-[#002147] text-white shadow-sm border border-white/10">
+                    Academic Year: {academicYear || currentAcademicYear}
+                  </span>
+                </div>
                 <p className="page-description">
                   Welcome back, <span className="font-bold text-[#002147]">{profile?.full_name || user?.email?.split('@')[0] || 'Administrator'}</span>! Here's an overview of Adarsh Oxford.
                 </p>

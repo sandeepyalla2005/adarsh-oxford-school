@@ -535,6 +535,15 @@ class StudentActionLog(BaseModel):
 
 # --- CORE ENDPOINTS ---
 
+@app.get("/api/academic-year/current")
+def get_current_academic_year_api():
+    try:
+        year = get_current_academic_year()
+        return {"current_academic_year": year}
+    except Exception as e:
+        logger.error(f"Error fetching current academic year: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/classes")
 def get_classes():
     try:
@@ -1375,6 +1384,7 @@ def refresh_dashboard_stats_task():
             "monthlyAccessories":month_acc,
             "categoryBreakdowns": breakdowns,
             "monthlyChartData": monthly_chart_data,
+            "academicYear": current_year,
             "lastUpdated": datetime.now(timezone.utc).isoformat()
         }
         
@@ -1442,6 +1452,7 @@ def get_dashboard_stats(background_tasks: BackgroundTasks, user=Depends(get_curr
             "weeklyCourse": 0.0, "weeklyBooks": 0.0, "weeklyTransport": 0.0, "weeklyAccessories": 0.0,
             "monthlyCourse": 0.0, "monthlyBooks": 0.0, "monthlyTransport": 0.0, "monthlyAccessories": 0.0,
             "monthlyChartData": [],
+            "academicYear": get_current_academic_year(),
             "lastUpdated": datetime.now(timezone.utc).isoformat()
         }
         return default_stats
@@ -2588,6 +2599,15 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
         # 4. Update the current academic year in school settings to target_year
         admin_client.table("school_settings").update({"current_academic_year": target_year}).eq("id", settings_row["id"]).execute()
         
+        # Delete disk-persisted stats cache
+        try:
+            stats_file = os.path.join(os.path.dirname(__file__), "stats.json")
+            if os.path.exists(stats_file):
+                os.remove(stats_file)
+                logger.info("Deleted stats.json cache file on promotion.")
+        except Exception as e:
+            logger.error(f"Error deleting stats.json cache file: {e}")
+            
         clear_all_caches()
         return {
             "status": "success",

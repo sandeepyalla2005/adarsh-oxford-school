@@ -49,7 +49,7 @@ import { Badge } from '@/components/ui/badge';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { ClassSlider } from '@/components/dashboard/ClassSlider';
 import { useAuth } from '@/lib/auth';
-import { getCurrentAcademicYear } from '@/lib/academic-year';
+import { useAcademicYear } from '@/contexts/AcademicYearContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -73,6 +73,7 @@ export default function BooksFees() {
   const { user, isStaff } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { currentAcademicYear: academicYear } = useAcademicYear();
 
   const [students, setStudents] = useState<StudentBooksFee[]>([]);
   const [classes, setClasses] = useState<{ id: string; name: string }[]>([]);
@@ -88,15 +89,13 @@ export default function BooksFees() {
 
   const classNames = ['all', ...classes.map(c => c.name)];
 
-  const academicYear = getCurrentAcademicYear();
-
   useEffect(() => {
     fetchClasses();
   }, []);
 
   useEffect(() => {
     fetchStudentsWithBooksFees();
-  }, [selectedClass]); // Refetch when class changes
+  }, [selectedClass, academicYear]); // Refetch when class or academic year changes
 
   const fetchClasses = async () => {
     const { data } = await supabase

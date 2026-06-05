@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/lib/auth";
+import { AcademicYearProvider } from "@/contexts/AcademicYearContext";
 import { getPortalDashboardPath, getPortalFromRole, portalPath, getPortalBasePath, getPortalFromPath, getPortalAuthPath, type PortalType, getAppBuildMode } from "@/lib/portal";
 import PortalAuth from "./components/auth/PortalAuth";
 
@@ -381,13 +382,15 @@ export function AppShell({ mode = "combined" }: AppShellProps) {
     <AppErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <TooltipProvider>
-            <Toaster />
-            <Sonner />
-            <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-              <AppRoutes mode={resolvedMode} />
-            </BrowserRouter>
-          </TooltipProvider>
+          <AcademicYearProvider>
+            <TooltipProvider>
+              <Toaster />
+              <Sonner />
+              <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+                <AppRoutes mode={resolvedMode} />
+              </BrowserRouter>
+            </TooltipProvider>
+          </AcademicYearProvider>
         </AuthProvider>
       </QueryClientProvider>
     </AppErrorBoundary>

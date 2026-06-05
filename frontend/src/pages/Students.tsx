@@ -30,6 +30,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { logStudentAction } from '@/lib/history';
 import { apiFetch } from '@/lib/api';
 import { getCurrentPortal, portalPath } from '@/lib/portal';
+import { useAcademicYear } from '@/contexts/AcademicYearContext';
 
 type Student = {
   id: string | number;
@@ -70,12 +71,19 @@ export default function Students() {
   const [isRequestingOtp, setIsRequestingOtp] = useState(false);
   const bulkFileRef = useRef<HTMLInputElement>(null);
 
+  const { currentAcademicYear } = useAcademicYear();
   const currentYear = new Date().getFullYear();
   const academicYears = Array.from({ length: 2040 - currentYear + 5 }, (_, i) => {
     const startYear = currentYear - 1 + i;
     return `${startYear}-${(startYear + 1).toString().slice(-2)}`;
   });
-  const [selectedYear, setSelectedYear] = useState(academicYears[1]);
+  const [selectedYear, setSelectedYear] = useState(currentAcademicYear || academicYears[1]);
+
+  useEffect(() => {
+    if (currentAcademicYear) {
+      setSelectedYear(currentAcademicYear);
+    }
+  }, [currentAcademicYear]);
 
   const [classes, setClasses] = useState<ClassRow[]>([]);
   useEffect(() => {

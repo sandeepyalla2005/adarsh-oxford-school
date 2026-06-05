@@ -60,7 +60,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { ClassSlider } from '@/components/dashboard/ClassSlider';
 import { useAuth } from '@/lib/auth';
-import { getCurrentAcademicYear } from '@/lib/academic-year';
+import { useAcademicYear } from '@/contexts/AcademicYearContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -100,6 +100,7 @@ export default function AccessoriesFees() {
   const navigate = useNavigate();
   const location = useLocation();
   const portal = getCurrentPortal(location.pathname);
+  const { currentAcademicYear: academicYear } = useAcademicYear();
 
   const [categories, setCategories] = useState<AccessoryCategory[]>([]);
   const [students, setStudents] = useState<StudentAccessoriesData[]>([]);
@@ -134,12 +135,13 @@ export default function AccessoriesFees() {
     'Class 5', 'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10'
   ];
 
-  const academicYear = getCurrentAcademicYear();
-
   useEffect(() => {
     fetchClasses();
-    fetchAllData();
   }, []);
+
+  useEffect(() => {
+    fetchAllData();
+  }, [academicYear]); // Refetch when academic year changes
 
   const fetchClasses = async () => {
     const { data } = await supabase.from('classes').select('id, name').order('sort_order');
