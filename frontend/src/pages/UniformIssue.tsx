@@ -424,8 +424,6 @@ export default function UniformIssue() {
                                         <SelectContent>
                                             <SelectItem value="cash">Cash</SelectItem>
                                             <SelectItem value="qr_code">UPI / Online</SelectItem>
-                                            <SelectItem value="card">Card</SelectItem>
-                                            <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
                                         </SelectContent>
                                     </Select>
                                 </div>

@@ -2,18 +2,14 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-
   Search,
   Phone,
-  CreditCard,
   Banknote,
   QrCode,
-  Building2,
   GraduationCap,
   BookOpen,
   Bus,
-  IndianRupee,
-  Smartphone
+  IndianRupee
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
@@ -50,7 +46,7 @@ import { Badge } from '@/components/ui/badge';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { ClassSlider } from '@/components/dashboard/ClassSlider';
 import { useAuth } from '@/lib/auth';
-import { getCurrentAcademicYear } from '@/lib/academic-year';
+import { useAcademicYear } from '@/contexts/AcademicYearContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -88,6 +84,7 @@ export default function CourseFees() {
   const { user, isStaff } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { currentAcademicYear: academicYear } = useAcademicYear();
 
   const [students, setStudents] = useState<StudentFeeData[]>([]);
   const [classes, setClasses] = useState<{ id: string; name: string }[]>([]);
@@ -109,15 +106,13 @@ export default function CourseFees() {
 
   const classNames = ['all', ...classes.map(c => c.name)];
 
-  const academicYear = getCurrentAcademicYear();
-
   useEffect(() => {
     fetchClasses();
   }, []);
 
   useEffect(() => {
     fetchStudentsWithFees();
-  }, [selectedClass]); // Refetch when class changes
+  }, [selectedClass, academicYear]); // Refetch when class or academic year changes
 
   const fetchClasses = async () => {
     const { data } = await supabase
@@ -562,6 +557,7 @@ export default function CourseFees() {
 
                       <TableHead>Parent Phones</TableHead>
                       <TableHead className="text-right">Total Fee</TableHead>
+                      <TableHead className="text-center">Old Due</TableHead>
                       <TableHead className="text-center">Term 1</TableHead>
                       <TableHead className="text-center">Term 2</TableHead>
                       <TableHead className="text-center">Term 3</TableHead>
@@ -572,7 +568,7 @@ export default function CourseFees() {
                   <TableBody>
                     {isLoading ? (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center py-12">
+                        <TableCell colSpan={10} className="text-center py-12">
                           <div className="flex items-center justify-center">
                             <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
                           </div>
@@ -580,7 +576,7 @@ export default function CourseFees() {
                       </TableRow>
                     ) : filteredStudents.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center py-12 text-muted-foreground">
+                        <TableCell colSpan={10} className="text-center py-12 text-muted-foreground">
                           No students found
                         </TableCell>
                       </TableRow>
@@ -603,6 +599,24 @@ export default function CourseFees() {
                           </TableCell>
                           <TableCell className="text-right font-medium">
                             {formatCurrency(student.totalFee)}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <div className="flex flex-col items-center gap-1.5 min-w-[80px]">
+                              <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">Total: {formatCurrency(student.old_dues)}</span>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "w-full justify-center",
+                                  getTermStatus(student.oldDuesPaid, student.old_dues) === 'success' && 'badge-success',
+                                  getTermStatus(student.oldDuesPaid, student.old_dues) === 'warning' && 'badge-warning'
+                                )}
+                              >
+                                {formatCurrency(student.oldDuesPaid)}
+                              </Badge>
+                              {student.old_dues - student.oldDuesPaid > 0 && (
+                                <span className="text-[10px] text-destructive font-bold uppercase tracking-tight">Due: {formatCurrency(student.old_dues - student.oldDuesPaid)}</span>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell className="text-center">
                             <div className="flex flex-col items-center gap-1.5 min-w-[80px]">
@@ -831,39 +845,6 @@ export default function CourseFees() {
                         <RadioGroupItem value="qr_code" id="qr_code" />
                         <QrCode className="h-4 w-4" />
                         QR Code
-                      </Label>
-                      <Label
-                        htmlFor="bank_transfer"
-                        className={cn(
-                          "flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-all",
-                          paymentMethod === 'bank_transfer' && "border-primary bg-primary/5"
-                        )}
-                      >
-                        <RadioGroupItem value="bank_transfer" id="bank_transfer" />
-                        <Building2 className="h-4 w-4" />
-                        Bank
-                      </Label>
-                      <Label
-                        htmlFor="card"
-                        className={cn(
-                          "flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-all",
-                          paymentMethod === 'card' && "border-primary bg-primary/5"
-                        )}
-                      >
-                        <RadioGroupItem value="card" id="card" />
-                        <CreditCard className="h-4 w-4" />
-                        Card
-                      </Label>
-                      <Label
-                        htmlFor="swiping"
-                        className={cn(
-                          "flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-all",
-                          paymentMethod === 'swiping' && "border-primary bg-primary/5"
-                        )}
-                      >
-                        <RadioGroupItem value="swiping" id="swiping" />
-                        <Smartphone className="h-4 w-4" />
-                        Swiping
                       </Label>
                     </div>
                   </RadioGroup>

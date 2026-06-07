@@ -5,15 +5,11 @@ import {
   BookOpen,
   Search,
   Phone,
-
   Banknote,
   QrCode,
-  Building2,
-  CreditCard,
   GraduationCap,
   Bus,
-  IndianRupee,
-  Smartphone
+  IndianRupee
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
@@ -49,7 +45,7 @@ import { Badge } from '@/components/ui/badge';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { ClassSlider } from '@/components/dashboard/ClassSlider';
 import { useAuth } from '@/lib/auth';
-import { getCurrentAcademicYear } from '@/lib/academic-year';
+import { useAcademicYear } from '@/contexts/AcademicYearContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -73,6 +69,7 @@ export default function BooksFees() {
   const { user, isStaff } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { currentAcademicYear: academicYear } = useAcademicYear();
 
   const [students, setStudents] = useState<StudentBooksFee[]>([]);
   const [classes, setClasses] = useState<{ id: string; name: string }[]>([]);
@@ -88,15 +85,13 @@ export default function BooksFees() {
 
   const classNames = ['all', ...classes.map(c => c.name)];
 
-  const academicYear = getCurrentAcademicYear();
-
   useEffect(() => {
     fetchClasses();
   }, []);
 
   useEffect(() => {
     fetchStudentsWithBooksFees();
-  }, [selectedClass]); // Refetch when class changes
+  }, [selectedClass, academicYear]); // Refetch when class or academic year changes
 
   const fetchClasses = async () => {
     const { data } = await supabase
@@ -519,39 +514,6 @@ export default function BooksFees() {
                         <RadioGroupItem value="qr_code" id="books-qr" />
                         <QrCode className="h-4 w-4" />
                         QR Code
-                      </Label>
-                      <Label
-                        htmlFor="books-bank"
-                        className={cn(
-                          "flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-all",
-                          paymentMethod === 'bank_transfer' && "border-primary bg-primary/5"
-                        )}
-                      >
-                        <RadioGroupItem value="bank_transfer" id="books-bank" />
-                        <Building2 className="h-4 w-4" />
-                        Bank
-                      </Label>
-                      <Label
-                        htmlFor="books-card"
-                        className={cn(
-                          "flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-all",
-                          paymentMethod === 'card' && "border-primary bg-primary/5"
-                        )}
-                      >
-                        <RadioGroupItem value="card" id="books-card" />
-                        <CreditCard className="h-4 w-4" />
-                        Card
-                      </Label>
-                      <Label
-                        htmlFor="books-swiping"
-                        className={cn(
-                          "flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-all",
-                          paymentMethod === 'swiping' && "border-primary bg-primary/5"
-                        )}
-                      >
-                        <RadioGroupItem value="swiping" id="books-swiping" />
-                        <Smartphone className="h-4 w-4" />
-                        Swiping
                       </Label>
                     </div>
                   </RadioGroup>

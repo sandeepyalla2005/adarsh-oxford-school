@@ -33,6 +33,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
+import { useAcademicYear } from '@/contexts/AcademicYearContext';
 
 interface Payment {
   id: string;
@@ -69,47 +70,104 @@ export default function FeeHistory() {
   const [selectedMonth, setSelectedMonth] = useState((new Date().getMonth() + 1).toString());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
 
+  const { currentAcademicYear } = useAcademicYear();
+  const [selectedAcademicYear, setSelectedAcademicYear] = useState<string>(currentAcademicYear || '');
+
+  const getAcademicYearOptions = (currentYearStr: string) => {
+    if (!currentYearStr) return [];
+    const options = ["all"];
+    try {
+      const parts = currentYearStr.split("-");
+      const currentStart = parseInt(parts[0]);
+      for (let y = currentStart; y >= 2025; y--) {
+        const endSuffix = String((y + 1) % 100).padStart(2, '0');
+        options.push(`${y}-${endSuffix}`);
+      }
+    } catch (e) {
+      options.push(currentYearStr);
+    }
+    return options;
+  };
+
+  useEffect(() => {
+    if (currentAcademicYear && !selectedAcademicYear) {
+      setSelectedAcademicYear(currentAcademicYear);
+    }
+  }, [currentAcademicYear]);
+
   useEffect(() => {
     fetchPayments();
-  }, []);
+  }, [selectedAcademicYear]);
 
   const fetchPayments = async () => {
     try {
+      setIsLoading(true);
+      
       // Fetch course payments
-      const { data: coursePayments } = await supabase
+      let courseQuery = supabase
         .from('course_payments')
-        .select('id, receipt_number, amount_paid, payment_method, payment_date, term, student_id, students(full_name)')
-        .order('payment_date', { ascending: false });
+        .select('id, receipt_number, amount_paid, payment_method, payment_date, term, student_id, students(full_name)');
+      if (selectedAcademicYear && selectedAcademicYear !== 'all') {
+        courseQuery = courseQuery.eq('academic_year', selectedAcademicYear);
+      }
+      const { data: coursePayments } = await courseQuery.order('payment_date', { ascending: false });
 
       // Fetch books payments
-      const { data: booksPayments } = await supabase
+      let booksQuery = supabase
         .from('books_payments')
-        .select('id, receipt_number, amount_paid, payment_method, payment_date, student_id, students(full_name)')
-        .order('payment_date', { ascending: false });
+        .select('id, receipt_number, amount_paid, payment_method, payment_date, student_id, students(full_name)');
+      if (selectedAcademicYear && selectedAcademicYear !== 'all') {
+        booksQuery = booksQuery.eq('academic_year', selectedAcademicYear);
+      }
+      const { data: booksPayments } = await booksQuery.order('payment_date', { ascending: false });
 
       // Fetch transport payments
-      const { data: transportPayments } = await supabase
+      let transportQuery = supabase
         .from('transport_payments')
-        .select('id, receipt_number, amount_paid, payment_method, payment_date, month, student_id, students(full_name)')
-        .order('payment_date', { ascending: false });
+        .select('id, receipt_number, amount_paid, payment_method, payment_date, month, student_id, students(full_name)');
+      if (selectedAcademicYear && selectedAcademicYear !== 'all') {
+        transportQuery = transportQuery.eq('academic_year', selectedAcademicYear);
+      }
+      const { data: transportPayments } = await transportQuery.order('payment_date', { ascending: false });
 
       // Fetch accessory sales (Item-based issues)
-      const { data: accessorySales } = await supabase
+      let accessorySalesQuery = supabase
         .from('accessory_sales')
-        .select('id, receipt_number, total_amount, payment_method, created_at, student_id, students(full_name), accessories(item_name)')
-        .order('created_at', { ascending: false });
+        .select('id, receipt_number, total_amount, payment_method, created_at, student_id, students(full_name), accessories(item_name)');
+      if (selectedAcademicYear && selectedAcademicYear !== 'all') {
+        accessorySalesQuery = accessorySalesQuery.eq('academic_year', selectedAcademicYear);
+      }
+      const { data: accessorySales } = await accessorySalesQuery.order('created_at', { ascending: false });
 
       // Fetch accessories fees (Category-based student payments)
-      const { data: studentAccessoryPayments } = await supabase
+      let studentAccessoryPaymentsQuery = supabase
         .from('student_accessory_payments')
-        .select('id, receipt_number, amount_paid, payment_method, payment_date, student_id, students(full_name), accessory_categories(name)')
-        .order('payment_date', { ascending: false });
+        .select('id, receipt_number, amount_paid, payment_method, payment_date, student_id, students(full_name), accessory_categories(name)');
+      if (selectedAcademicYear && selectedAcademicYear !== 'all') {
+        studentAccessoryPaymentsQuery = studentAccessoryPaymentsQuery.eq('academic_year', selectedAcademicYear);
+      }
+      const { data: studentAccessoryPayments } = await studentAccessoryPaymentsQuery.order('payment_date', { ascending: false });
 
       // Fetch left student recovery payments
       const { data: leftStudentPayments } = await supabase
         .from('left_student_recovery_payments')
         .select('id, receipt_number, amount_paid, payment_method, payment_date, left_student_fee_records(students(full_name))')
         .order('payment_date', { ascending: false });
+
+      let filteredLeftPayments = leftStudentPayments || [];
+      if (selectedAcademicYear && selectedAcademicYear !== 'all') {
+        try {
+          const parts = selectedAcademicYear.split("-");
+          const startYear = parseInt(parts[0]);
+          const startDate = new Date(startYear, 3, 1).toISOString(); // April 1st of startYear
+          const endDate = new Date(startYear + 1, 2, 31, 23, 59, 59).toISOString(); // March 31st of startYear + 1
+          filteredLeftPayments = (leftStudentPayments || []).filter(p => {
+            return p.payment_date >= startDate && p.payment_date <= endDate;
+          });
+        } catch (e) {
+          console.error("Error filtering left student payments by academic year:", e);
+        }
+      }
 
       const allPayments: Payment[] = [
         ...(coursePayments || []).map(p => ({
@@ -161,7 +219,7 @@ export default function FeeHistory() {
           student_name: (p.students as any)?.full_name || 'Unknown',
           item_name: (p as any).accessory_categories?.name || 'Accessory Fee',
         })),
-        ...(leftStudentPayments || []).map(p => ({
+        ...(filteredLeftPayments || []).map(p => ({
           id: p.id,
           receipt_number: p.receipt_number,
           amount_paid: Number(p.amount_paid),
@@ -414,6 +472,22 @@ export default function FeeHistory() {
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-10"
                 />
+              </div>
+
+              <div className="flex gap-2">
+                <Select value={selectedAcademicYear} onValueChange={setSelectedAcademicYear}>
+                  <SelectTrigger className="w-48 bg-white border-slate-200">
+                    <SelectValue placeholder="Academic Year" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Academic Years</SelectItem>
+                    {getAcademicYearOptions(currentAcademicYear).filter(y => y !== "all").map(year => (
+                      <SelectItem key={year} value={year}>
+                        Year: {year}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <TabsContent value="daily" className="mt-0">

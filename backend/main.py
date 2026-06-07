@@ -167,10 +167,25 @@ async def get_current_user(token: HTTPAuthorizationCredentials = Depends(auth_sc
 
 
 def get_current_academic_year(reference_date: Optional[datetime] = None) -> str:
+    if reference_date is None:
+        cached = cache_get("academic_year:current", 60)
+        if cached:
+            return cached
+        try:
+            client = admin_supabase if admin_supabase is not None else supabase
+            res = client.table("school_settings").select("current_academic_year").limit(1).execute()
+            if res.data and res.data[0].get("current_academic_year"):
+                val = res.data[0]["current_academic_year"]
+                cache_set("academic_year:current", val, 60)
+                return val
+        except Exception as e:
+            logger.error(f"Error fetching current academic year from settings: {e}")
+            
     current = reference_date or datetime.now(timezone.utc)
     start_year = current.year if current.month >= 4 else current.year - 1
     end_year_suffix = str((start_year + 1) % 100).zfill(2)
     return f"{start_year}-{end_year_suffix}"
+
 
 
 def get_student_actual_pending_fees(student_id: str, student_data: dict, client: Client) -> dict:
@@ -519,6 +534,15 @@ class StudentActionLog(BaseModel):
     role: str
 
 # --- CORE ENDPOINTS ---
+
+@app.get("/api/academic-year/current")
+def get_current_academic_year_api():
+    try:
+        year = get_current_academic_year()
+        return {"current_academic_year": year}
+    except Exception as e:
+        logger.error(f"Error fetching current academic year: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/classes")
 def get_classes():
@@ -1121,32 +1145,34 @@ def refresh_dashboard_stats_task():
         student_accessory_payments = []
         accessory_sales = []
 
+        current_year = get_current_academic_year()
+
         try:
-            res = client.table("course_payments").select("amount_paid, payment_date, payment_method").execute()
+            res = client.table("course_payments").select("amount_paid, payment_date, payment_method").eq("academic_year", current_year).execute()
             course_payments = res.data or []
         except Exception as e:
             logger.error(f"Error fetching course_payments: {e}")
 
         try:
-            res = client.table("books_payments").select("amount_paid, payment_date, payment_method").execute()
+            res = client.table("books_payments").select("amount_paid, payment_date, payment_method").eq("academic_year", current_year).execute()
             books_payments = res.data or []
         except Exception as e:
             logger.error(f"Error fetching books_payments: {e}")
 
         try:
-            res = client.table("transport_payments").select("amount_paid, payment_date, payment_method").execute()
+            res = client.table("transport_payments").select("amount_paid, payment_date, payment_method").eq("academic_year", current_year).execute()
             transport_payments = res.data or []
         except Exception as e:
             logger.error(f"Error fetching transport_payments: {e}")
 
         try:
-            res = client.table("student_accessory_payments").select("amount_paid, payment_date, payment_method").execute()
+            res = client.table("student_accessory_payments").select("amount_paid, payment_date, payment_method").eq("academic_year", current_year).execute()
             student_accessory_payments = res.data or []
         except Exception as e:
             logger.error(f"Error fetching student_accessory_payments: {e}")
 
         try:
-            res = client.table("accessory_sales").select("total_amount, created_at, payment_method").execute()
+            res = client.table("accessory_sales").select("total_amount, created_at, payment_method").eq("academic_year", current_year).execute()
             accessory_sales = res.data or []
         except Exception as e:
             logger.error(f"Error fetching accessory_sales: {e}")
@@ -1358,6 +1384,7 @@ def refresh_dashboard_stats_task():
             "monthlyAccessories":month_acc,
             "categoryBreakdowns": breakdowns,
             "monthlyChartData": monthly_chart_data,
+            "academicYear": current_year,
             "lastUpdated": datetime.now(timezone.utc).isoformat()
         }
         
@@ -1425,6 +1452,7 @@ def get_dashboard_stats(background_tasks: BackgroundTasks, user=Depends(get_curr
             "weeklyCourse": 0.0, "weeklyBooks": 0.0, "weeklyTransport": 0.0, "weeklyAccessories": 0.0,
             "monthlyCourse": 0.0, "monthlyBooks": 0.0, "monthlyTransport": 0.0, "monthlyAccessories": 0.0,
             "monthlyChartData": [],
+            "academicYear": get_current_academic_year(),
             "lastUpdated": datetime.now(timezone.utc).isoformat()
         }
         return default_stats
@@ -2405,6 +2433,18 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
         cat_res = admin_client.table("accessory_categories").select("id, default_price").eq("is_active", True).execute()
         category_prices = {c["id"]: float(c["default_price"] or 0.0) for c in (cat_res.data or [])}
 
+        # Check if fine_amount and misc_charges columns exist in the database table
+        has_fine_amount = False
+        has_misc_charges = False
+        try:
+            test_res = admin_client.table("students").select("*").limit(1).execute()
+            if test_res.data:
+                cols = test_res.data[0].keys()
+                has_fine_amount = "fine_amount" in cols
+                has_misc_charges = "misc_charges" in cols
+        except Exception as e:
+            logger.warning(f"Error checking student columns in promote_students: {e}")
+
         promoted = 0
         skipped = 0
         
@@ -2524,6 +2564,15 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
                     student["term1_fee"] = float(next_fee_struct.get("term1_fee") or 0.0)
                     student["term2_fee"] = float(next_fee_struct.get("term2_fee") or 0.0)
                     student["term3_fee"] = float(next_fee_struct.get("term3_fee") or 0.0)
+                    if has_fine_amount:
+                        student["fine_amount"] = 0.0
+                    elif "fine_amount" in student:
+                        del student["fine_amount"]
+                        
+                    if has_misc_charges:
+                        student["misc_charges"] = 0.0
+                    elif "misc_charges" in student:
+                        del student["misc_charges"]
                     
                     # Keep has_books/has_transport and update fees based on new class configuration
                     if student.get("has_books"):
@@ -2550,6 +2599,15 @@ async def promote_students(req: PromoteStudentsRequest, user=Depends(get_current
         # 4. Update the current academic year in school settings to target_year
         admin_client.table("school_settings").update({"current_academic_year": target_year}).eq("id", settings_row["id"]).execute()
         
+        # Delete disk-persisted stats cache
+        try:
+            stats_file = os.path.join(os.path.dirname(__file__), "stats.json")
+            if os.path.exists(stats_file):
+                os.remove(stats_file)
+                logger.info("Deleted stats.json cache file on promotion.")
+        except Exception as e:
+            logger.error(f"Error deleting stats.json cache file: {e}")
+            
         clear_all_caches()
         return {
             "status": "success",
@@ -2682,7 +2740,25 @@ async def delete_student(student_id: str, req: DeleteStudentRequest, user=Depend
         admin_client = get_admin_client()
         
         # 1. Fetch student details to verify pending fees
-        student_res = admin_client.table("students").select("id, full_name, term1_fee, term2_fee, term3_fee, old_dues, books_fee, transport_fee, has_books, has_transport, fine_amount, misc_charges").eq("id", student_id).single().execute()
+        # Check if fine_amount and misc_charges exist in database dynamically
+        has_fine_amount = False
+        has_misc_charges = False
+        try:
+            test_res = admin_client.table("students").select("*").limit(1).execute()
+            if test_res.data:
+                cols = test_res.data[0].keys()
+                has_fine_amount = "fine_amount" in cols
+                has_misc_charges = "misc_charges" in cols
+        except Exception:
+            pass
+
+        select_cols = "id, full_name, term1_fee, term2_fee, term3_fee, old_dues, books_fee, transport_fee, has_books, has_transport"
+        if has_fine_amount:
+            select_cols += ", fine_amount"
+        if has_misc_charges:
+            select_cols += ", misc_charges"
+
+        student_res = admin_client.table("students").select(select_cols).eq("id", student_id).single().execute()
         if not student_res.data:
             raise HTTPException(status_code=404, detail="Student not found")
             
@@ -3412,6 +3488,199 @@ async def update_left_student_details(request: LeftStudentUpdateDetailsRequest, 
         logger.error(f"Error updating left student details: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+def get_start_year_from_year_str(year_str: str) -> int:
+    if not year_str:
+        return 0
+    if "-" in year_str:
+        parts = year_str.split("-")
+        try:
+            return int(parts[0])
+        except ValueError:
+            return 0
+    else:
+        try:
+            return int(year_str)
+        except ValueError:
+            return 0
+
+@app.get("/api/reports/financial-year")
+async def get_financial_year_report(year: str, user=Depends(get_current_user)):
+    try:
+        user_role = getattr(user, "role", "staff")
+        if user_role not in ["admin", "feeInCharge", "staff"]:
+            raise HTTPException(status_code=403, detail="Not authorized to view financial reports")
+            
+        fy_start = get_start_year_from_year_str(year)
+        if fy_start <= 0:
+            raise HTTPException(status_code=400, detail="Invalid financial year format. Expected YYYY-YY (e.g. 2025-26)")
+            
+        start_date = f"{fy_start}-04-01T00:00:00Z"
+        end_date = f"{fy_start + 1}-03-31T23:59:59Z"
+        
+        client = admin_supabase if admin_supabase is not None else supabase
+        
+        # 1. Fetch payments
+        course_payments = []
+        books_payments = []
+        transport_payments = []
+        student_accessory_payments = []
+        accessory_sales = []
+        left_payments = []
+        
+        try:
+            res = client.table("course_payments").select("amount_paid, payment_date, payment_method, academic_year, term").gte("payment_date", start_date).lte("payment_date", end_date).execute()
+            course_payments = res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching course_payments: {e}")
+            
+        try:
+            res = client.table("books_payments").select("amount_paid, payment_date, payment_method, academic_year").gte("payment_date", start_date).lte("payment_date", end_date).execute()
+            books_payments = res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching books_payments: {e}")
+            
+        try:
+            res = client.table("transport_payments").select("amount_paid, payment_date, payment_method, academic_year").gte("payment_date", start_date).lte("payment_date", end_date).execute()
+            transport_payments = res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching transport_payments: {e}")
+            
+        try:
+            res = client.table("student_accessory_payments").select("amount_paid, payment_date, payment_method, academic_year").gte("payment_date", start_date).lte("payment_date", end_date).execute()
+            student_accessory_payments = res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching student_accessory_payments: {e}")
+            
+        try:
+            res = client.table("accessory_sales").select("total_amount, created_at, payment_method, academic_year").gte("created_at", start_date).lte("created_at", end_date).execute()
+            accessory_sales = res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching accessory_sales: {e}")
+            
+        try:
+            res = client.table("left_student_recovery_payments").select("amount_paid, created_at, payment_method").gte("created_at", start_date).lte("created_at", end_date).execute()
+            left_payments = res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching left recovery payments: {e}")
+
+        # Normalization and breakdown mapping
+        def map_method(m_str):
+            m = (m_str or "").lower()
+            if "cash" in m:
+                return "cash"
+            if "qr" in m or "upi" in m or "scan" in m or "gpay" in m or "phonepe" in m or "scanner" in m:
+                return "upi"
+            if "bank" in m or "transfer" in m or "net" in m:
+                return "bank"
+            if "card" in m:
+                return "cards"
+            if "swip" in m:
+                return "swiping"
+            return "cash"
+            
+        # Calculate pending dues
+        pending_dues = 0.0
+        try:
+            current_year_res = client.table("school_settings").select("current_academic_year").limit(1).execute()
+            current_year = current_year_res.data[0].get("current_academic_year") if (current_year_res.data and current_year_res.data[0].get("current_academic_year")) else get_current_academic_year()
+            current_fy_start = get_start_year_from_year_str(current_year)
+            
+            if fy_start == current_fy_start:
+                course_expected = books_expected = transport_expected = 0.0
+                res_s = client.table("students").select(
+                    "term1_fee, term2_fee, term3_fee, old_dues, has_books, books_fee, has_transport, transport_fee"
+                ).eq("is_active", True).execute()
+                for s in (res_s.data or []):
+                    course_expected += (
+                        float(s.get("term1_fee") or 0.0)
+                        + float(s.get("term2_fee") or 0.0)
+                        + float(s.get("term3_fee") or 0.0)
+                        + float(s.get("old_dues") or 0.0)
+                    )
+                    if s.get("has_books"):
+                        books_expected += float(s.get("books_fee") or 0.0)
+                    if s.get("has_transport"):
+                        transport_expected += float(s.get("transport_fee") or 0.0) * 12
+                
+                # Fetch all course payments, books payments, and transport payments made FOR the current academic year
+                res_cp = client.table("course_payments").select("amount_paid").eq("academic_year", current_year).execute()
+                res_bp = client.table("books_payments").select("amount_paid").eq("academic_year", current_year).execute()
+                res_tp = client.table("transport_payments").select("amount_paid").eq("academic_year", current_year).execute()
+                
+                col_course = sum(float(p.get("amount_paid") or 0.0) for p in (res_cp.data or []))
+                col_books = sum(float(p.get("amount_paid") or 0.0) for p in (res_bp.data or []))
+                col_transport = sum(float(p.get("amount_paid") or 0.0) for p in (res_tp.data or []))
+                
+                pending_dues = max(0.0, (course_expected + books_expected + transport_expected) - col_course - col_books - col_transport)
+            elif fy_start == current_fy_start - 1:
+                res_s = client.table("students").select("old_dues").eq("is_active", True).execute()
+                pending_dues = sum(float(s.get("old_dues") or 0.0) for s in (res_s.data or []))
+        except Exception as e:
+            logger.error(f"Error calculating pending dues for reports: {e}")
+
+        def empty_breakdown():
+            return {"total": 0.0, "cash": 0.0, "upi": 0.0, "bank": 0.0, "cards": 0.0, "swiping": 0.0}
+            
+        results = {
+            "financial_year": year,
+            "total_income": 0.0,
+            "previous_year": empty_breakdown(),
+            "normal": empty_breakdown(),
+            "next_year": empty_breakdown(),
+            "all_splits": {"cash": 0.0, "upi": 0.0, "bank": 0.0, "cards": 0.0, "swiping": 0.0},
+            "pending_dues": pending_dues
+        }
+        
+        # Helper to process and aggregate
+        def process_payment(amount, method, ac_year, term=None, is_left=False):
+            amt = float(amount or 0.0)
+            m_key = map_method(method)
+            
+            # Classification
+            if is_left:
+                classification = "previous_year"
+            elif term == 0:
+                classification = "previous_year"
+            elif ac_year:
+                ac_start = get_start_year_from_year_str(ac_year)
+                if ac_start > 0:
+                    if ac_start < fy_start:
+                        classification = "previous_year"
+                    elif ac_start > fy_start:
+                        classification = "next_year"
+                    else:
+                        classification = "normal"
+                else:
+                    classification = "normal"
+            else:
+                classification = "normal"
+                
+            results["total_income"] += amt
+            results[classification]["total"] += amt
+            results[classification][m_key] += amt
+            results["all_splits"][m_key] += amt
+
+        # Process standard payments
+        for p in course_payments:
+            process_payment(p.get("amount_paid"), p.get("payment_method"), p.get("academic_year"), term=p.get("term"))
+        for p in books_payments:
+            process_payment(p.get("amount_paid"), p.get("payment_method"), p.get("academic_year"))
+        for p in transport_payments:
+            process_payment(p.get("amount_paid"), p.get("payment_method"), p.get("academic_year"))
+        for p in student_accessory_payments:
+            process_payment(p.get("amount_paid"), p.get("payment_method"), p.get("academic_year"))
+        for p in accessory_sales:
+            process_payment(p.get("total_amount"), p.get("payment_method"), p.get("academic_year"))
+        for p in left_payments:
+            process_payment(p.get("amount_paid"), p.get("payment_method"), None, is_left=True)
+            
+        return {"status": "success", "data": results}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Financial year report error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 class IssueMarksheetRequest(BaseModel):
     record_id: str

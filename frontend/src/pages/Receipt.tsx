@@ -287,9 +287,11 @@ export default function Receipt() {
 
     const formatPaymentMode = (method: string) => {
         if (!method) return 'UPI / Cash / Card';
-        if (method.toLowerCase() === 'qr_code') return 'UPI';
-        if (method.toLowerCase() === 'cash') return 'Cash';
-        if (method.toLowerCase() === 'card') return 'Card';
+        const m = method.toLowerCase();
+        if (m === 'qr_code' || m === 'upi') return 'UPI';
+        if (m === 'cash') return 'Cash';
+        if (m === 'card' || m === 'cards') return 'Card';
+        if (m === 'bank_transfer' || m === 'bank') return 'Bank Transfer';
         return method.toUpperCase();
     };
 

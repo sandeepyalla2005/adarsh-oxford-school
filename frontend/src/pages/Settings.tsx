@@ -30,7 +30,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { getCurrentAcademicYear } from '@/lib/academic-year';
+import { useAcademicYear } from '@/contexts/AcademicYearContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -54,6 +54,7 @@ interface SchoolSetting {
 export default function Settings() {
   const { user, isAdmin, isStaff, userRole } = useAuth();
   const { toast } = useToast();
+  const { refreshAcademicYear } = useAcademicYear();
 
   const [settings, setSettings] = useState<SchoolSetting | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -238,6 +239,8 @@ export default function Settings() {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.detail || 'Promotion failed');
+
+      await refreshAcademicYear();
 
       toast({
         title: 'Promotion Complete',

@@ -7,12 +7,9 @@ import {
   Phone,
   Banknote,
   QrCode,
-  Building2,
-  CreditCard,
   GraduationCap,
   Bus,
   IndianRupee,
-  Smartphone,
   BookOpen,
   Settings,
   Plus,
@@ -60,7 +57,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { ClassSlider } from '@/components/dashboard/ClassSlider';
 import { useAuth } from '@/lib/auth';
-import { getCurrentAcademicYear } from '@/lib/academic-year';
+import { useAcademicYear } from '@/contexts/AcademicYearContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -100,6 +97,7 @@ export default function AccessoriesFees() {
   const navigate = useNavigate();
   const location = useLocation();
   const portal = getCurrentPortal(location.pathname);
+  const { currentAcademicYear: academicYear } = useAcademicYear();
 
   const [categories, setCategories] = useState<AccessoryCategory[]>([]);
   const [students, setStudents] = useState<StudentAccessoriesData[]>([]);
@@ -134,12 +132,13 @@ export default function AccessoriesFees() {
     'Class 5', 'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10'
   ];
 
-  const academicYear = getCurrentAcademicYear();
-
   useEffect(() => {
     fetchClasses();
-    fetchAllData();
   }, []);
+
+  useEffect(() => {
+    fetchAllData();
+  }, [academicYear]); // Refetch when academic year changes
 
   const fetchClasses = async () => {
     const { data } = await supabase.from('classes').select('id, name').order('sort_order');
@@ -742,10 +741,9 @@ export default function AccessoriesFees() {
                   <div className="space-y-3">
                       <Label className="text-xs uppercase font-bold tracking-widest text-slate-500">Payment Method</Label>
                       <RadioGroup value={paymentMethod} onValueChange={setPaymentMethod}>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-2 gap-2">
                           <Label htmlFor="pay-cash" className={cn("flex flex-col cursor-pointer items-center justify-center gap-2 rounded-xl border p-3 hover:bg-slate-50", paymentMethod === 'cash' && "border-primary bg-primary/5 ring-1 ring-primary/20")}><RadioGroupItem value="cash" id="pay-cash" className="sr-only" /><Banknote className="h-5 w-5 text-slate-600" /><span className="text-xs font-semibold">Cash</span></Label>
                           <Label htmlFor="pay-qr" className={cn("flex flex-col cursor-pointer items-center justify-center gap-2 rounded-xl border p-3 hover:bg-slate-50", paymentMethod === 'qr_code' && "border-primary bg-primary/5 ring-1 ring-primary/20")}><RadioGroupItem value="qr_code" id="pay-qr" className="sr-only" /><QrCode className="h-5 w-5 text-slate-600" /><span className="text-xs font-semibold">QR Code</span></Label>
-                          <Label htmlFor="pay-bank" className={cn("flex flex-col cursor-pointer items-center justify-center gap-2 rounded-xl border p-3 hover:bg-slate-50", paymentMethod === 'bank_transfer' && "border-primary bg-primary/5 ring-1 ring-primary/20")}><RadioGroupItem value="bank_transfer" id="pay-bank" className="sr-only" /><Building2 className="h-5 w-5 text-slate-600" /><span className="text-xs font-semibold">Bank</span></Label>
                         </div>
                       </RadioGroup>
                   </div>

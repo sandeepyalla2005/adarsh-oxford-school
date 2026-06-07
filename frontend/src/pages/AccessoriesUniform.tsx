@@ -804,9 +804,6 @@ export default function AccessoriesUniform() {
                       <SelectContent>
                         <SelectItem value="cash">Cash</SelectItem>
                         <SelectItem value="qr_code">QR Code</SelectItem>
-                        <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                        <SelectItem value="card">Card</SelectItem>
-                        <SelectItem value="swiping">Swiping</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
