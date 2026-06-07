@@ -7,12 +7,10 @@ import {
   User,
   GraduationCap,
   Calendar,
-  CreditCard,
   CheckCircle2,
   AlertCircle,
   ShieldCheck,
   Check,
-  Building,
   Copy,
   Printer,
   TrendingUp,
@@ -70,7 +68,7 @@ export default function PaymentGateway() {
 
   // Flow states
   const [selectedQR, setSelectedQR] = useState<'phonepe' | 'icici'>('phonepe');
-  const [paymentMethod, setPaymentMethod] = useState<'upi' | 'cash' | 'card' | 'bank_transfer'>('upi');
+  const [paymentMethod, setPaymentMethod] = useState<'upi' | 'cash'>('upi');
 
   // UPI states
   const [upiNumber, setUpiNumber] = useState('');
@@ -153,24 +151,6 @@ export default function PaymentGateway() {
         });
         return;
       }
-    } else if (paymentMethod === 'card') {
-      if (!cardNumber || !cardHolder || !cardExpiry || !cardCvv) {
-        toast({
-          variant: 'destructive',
-          title: 'Card Details Required',
-          description: 'Please enter all debit/credit card fields to proceed.',
-        });
-        return;
-      }
-    } else if (paymentMethod === 'bank_transfer') {
-      if (!bankUtr) {
-        toast({
-          variant: 'destructive',
-          title: 'Bank Reference Required',
-          description: 'Please submit the bank transfer reference UTR number.',
-        });
-        return;
-      }
     }
     setShowConfirmDialog(true);
   };
@@ -191,19 +171,12 @@ export default function PaymentGateway() {
           .map(([denom, count]) => `${count}x₹${denom}`)
           .join(', ');
         notesDetails = `Cash Payment. Denominations: ${cashList || 'None'}`;
-      } else if (paymentMethod === 'card') {
-        const maskedCard = `•••• •••• •••• ${cardNumber.slice(-4)}`;
-        notesDetails = `Card Payment. Card: ${maskedCard}. Holder: ${cardHolder}`;
-      } else if (paymentMethod === 'bank_transfer') {
-        notesDetails = `Bank Transfer. UTR/Ref: ${bankUtr}`;
       }
 
       // 2. Map frontend payment method to API expectations
       const methodMap = {
         upi: 'qr_code',
-        cash: 'cash',
-        card: 'card',
-        bank_transfer: 'bank_transfer'
+        cash: 'cash'
       };
       const apiMethod = methodMap[paymentMethod];
 
@@ -230,7 +203,7 @@ export default function PaymentGateway() {
           body: JSON.stringify({
             record_id: state.leftRecordId,
             amount: amount || state.amount || 0,
-            method: paymentMethod === 'upi' ? 'UPI' : (paymentMethod === 'bank_transfer' ? 'Bank' : paymentMethod.toUpperCase()),
+            method: paymentMethod === 'upi' ? 'UPI' : 'CASH',
             remarks: notesDetails
           }),
         });
@@ -561,19 +534,15 @@ export default function PaymentGateway() {
                     </div>
 
                     {/* Payment Mode Selector Tabs */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-900/60 p-1.5 rounded-xl border border-slate-800/80">
-                      {(['upi', 'cash', 'bank_transfer', 'card'] as const).map((method) => {
+                    <div className="grid grid-cols-2 gap-2 bg-slate-900/60 p-1.5 rounded-xl border border-slate-800/80">
+                      {(['upi', 'cash'] as const).map((method) => {
                         const label = {
                           upi: 'UPI Scanner',
-                          cash: 'Cash Denom',
-                          bank_transfer: 'Bank Transfer',
-                          card: 'Card Payment'
+                          cash: 'Cash Denom'
                         }[method];
                         const Icon = {
                           upi: QrCode,
-                          cash: Coins,
-                          bank_transfer: Building,
-                          card: CreditCard
+                          cash: Coins
                         }[method];
                         const isActive = paymentMethod === method;
                         return (
@@ -798,166 +767,7 @@ export default function PaymentGateway() {
                         </motion.div>
                       )}
 
-                      {paymentMethod === 'card' && (
-                        <motion.div
-                          key="card-panel"
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -10 }}
-                          transition={{ duration: 0.2 }}
-                          className="space-y-6"
-                        >
-                          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
-                            {/* Card mockup */}
-                            <div className="md:col-span-5 flex justify-center">
-                              <div className="w-full max-w-[260px] aspect-[1.586/1] bg-gradient-to-br from-indigo-750 via-purple-750 to-indigo-900 rounded-xl p-5 shadow-2xl relative text-white overflow-hidden border border-white/10 flex flex-col justify-between">
-                                <div className="absolute top-0 right-0 w-24 h-24 rounded-full bg-white/5 blur-xl pointer-events-none" />
-                                <div className="flex justify-between items-start">
-                                  <div className="h-8 w-10 bg-amber-400/20 rounded-md border border-amber-400/30 flex items-center justify-center relative">
-                                    <div className="absolute inset-2 border border-amber-400/10 rounded-sm" />
-                                  </div>
-                                  <span className="font-extrabold italic text-[11px] text-white/50 tracking-wider">SECURE DEBIT</span>
-                                </div>
-                                <div className="space-y-0.5 mt-3">
-                                  <span className="text-[7px] uppercase tracking-widest text-white/40 block">Card Number</span>
-                                  <p className="font-mono text-sm font-bold tracking-[0.2em] whitespace-nowrap">
-                                    {cardNumber ? cardNumber.replace(/(\d{4})/g, '$1 ').trim() : '•••• •••• •••• ••••'}
-                                  </p>
-                                </div>
-                                <div className="flex justify-between items-end mt-3">
-                                  <div className="space-y-0.5 min-w-0 flex-1 mr-2">
-                                    <span className="text-[7px] uppercase tracking-widest text-white/40 block">Card Holder</span>
-                                    <p className="text-[10px] font-bold uppercase tracking-wider truncate">
-                                      {cardHolder || 'CARDHOLDER NAME'}
-                                    </p>
-                                  </div>
-                                  <div className="space-y-0.5 text-right shrink-0">
-                                    <span className="text-[7px] uppercase tracking-widest text-white/40 block">Expires</span>
-                                    <p className="text-[10px] font-bold font-mono">
-                                      {cardExpiry || 'MM/YY'}
-                                    </p>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Card inputs */}
-                            <div className="md:col-span-7 space-y-3.5">
-                              <div className="space-y-1.5">
-                                <label className="text-xs font-semibold text-slate-300">Cardholder Name</label>
-                                <input
-                                  type="text"
-                                  value={cardHolder}
-                                  onChange={(e) => setCardHolder(e.target.value.toUpperCase())}
-                                  placeholder="Name as printed on card"
-                                  className="w-full h-10 px-3 bg-slate-950 border border-slate-800 rounded-lg text-sm focus:outline-none focus:border-indigo-500 text-slate-200"
-                                />
-                              </div>
-                              <div className="space-y-1.5">
-                                <label className="text-xs font-semibold text-slate-300">Card Number</label>
-                                <input
-                                  type="text"
-                                  value={cardNumber}
-                                  onChange={(e) => setCardNumber(e.target.value.replace(/\D/g, '').slice(0, 16))}
-                                  placeholder="16-digit card number"
-                                  className="w-full h-10 px-3 bg-slate-950 border border-slate-800 rounded-lg text-sm focus:outline-none focus:border-indigo-500 text-slate-200 font-mono"
-                                />
-                              </div>
-                              <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1.5">
-                                  <label className="text-xs font-semibold text-slate-300">Expiry Date</label>
-                                  <input
-                                    type="text"
-                                    value={cardExpiry}
-                                    onChange={(e) => {
-                                      let val = e.target.value.replace(/\D/g, '').slice(0, 4);
-                                      if (val.length > 2) val = val.slice(0, 2) + '/' + val.slice(2);
-                                      setCardExpiry(val);
-                                    }}
-                                    placeholder="MM/YY"
-                                    className="w-full h-10 px-3 bg-slate-950 border border-slate-800 rounded-lg text-sm focus:outline-none focus:border-indigo-500 text-slate-200 font-mono text-center"
-                                  />
-                                </div>
-                                <div className="space-y-1.5">
-                                  <label className="text-xs font-semibold text-slate-300">CVV</label>
-                                  <input
-                                    type="password"
-                                    value={cardCvv}
-                                    onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, '').slice(0, 3))}
-                                    placeholder="•••"
-                                    maxLength={3}
-                                    className="w-full h-10 px-3 bg-slate-950 border border-slate-800 rounded-lg text-sm focus:outline-none focus:border-indigo-500 text-slate-200 font-mono text-center"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </motion.div>
-                      )}
-
-                      {paymentMethod === 'bank_transfer' && (
-                        <motion.div
-                          key="bank-panel"
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -10 }}
-                          transition={{ duration: 0.2 }}
-                          className="space-y-6"
-                        >
-                          <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-800">
-                            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-2">
-                              <Building className="h-4 w-4 text-emerald-400" />
-                              School Bank Account Details
-                            </h3>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              {[
-                                { label: 'Account Holder Name', value: 'ADARSH OXFORD EDUCATION SOCIETY', key: 'name' },
-                                { label: 'Bank Name', value: 'ICICI Bank Ltd', key: 'bank' },
-                                { label: 'Account Number', value: '634232987654', key: 'acc_no', copyable: true },
-                                { label: 'IFSC Code', value: 'ICIC0006342', key: 'ifsc', copyable: true },
-                                { label: 'Branch Name', value: 'Seethammadhara Branch, Visakhapatnam', key: 'branch' },
-                                { label: 'Account Type', value: 'Current Account', key: 'type' }
-                              ].map((field) => (
-                                <div key={field.key} className="bg-slate-950 p-2.5 rounded-lg border border-slate-850 flex justify-between items-center">
-                                  <div className="space-y-0.5">
-                                    <span className="text-[9px] uppercase font-bold text-slate-500">{field.label}</span>
-                                    <p className="text-xs font-bold text-slate-200 break-all">{field.value}</p>
-                                  </div>
-                                  {field.copyable && (
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-8 w-8 text-slate-400 hover:text-white"
-                                      onClick={() => {
-                                        navigator.clipboard.writeText(field.value);
-                                        toast({
-                                          title: 'Copied!',
-                                          description: `${field.label} copied.`,
-                                        });
-                                      }}
-                                    >
-                                      <Copy className="h-3.5 w-3.5" />
-                                    </Button>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-800 space-y-2 max-w-md">
-                            <label className="text-xs font-semibold text-slate-300 block">Bank Transaction UTR / Ref Number</label>
-                            <input
-                              type="text"
-                              value={bankUtr}
-                              onChange={(e) => setBankUtr(e.target.value)}
-                              placeholder="Enter IMPS/NEFT/RTGS Reference UTR Number"
-                              className="w-full h-10 px-3 bg-slate-950 border border-slate-800 rounded-lg text-sm focus:outline-none focus:border-indigo-500 text-slate-200"
-                            />
-                            <p className="text-[10px] text-slate-500">Submit reference ID generated after initiating bank transfer</p>
-                          </div>
-                        </motion.div>
-                      )}
+                      {/* card and bank panels removed */}
                     </AnimatePresence>
 
                     {/* Action Footer Buttons */}

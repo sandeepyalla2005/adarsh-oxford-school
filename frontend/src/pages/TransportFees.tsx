@@ -5,15 +5,11 @@ import {
   Bus,
   Search,
   Phone,
-
   Banknote,
   QrCode,
-  Building2,
-  CreditCard,
   GraduationCap,
   BookOpen,
-  IndianRupee,
-  Smartphone
+  IndianRupee
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
@@ -572,39 +568,6 @@ export default function TransportFees() {
                         <RadioGroupItem value="qr_code" id="transport-qr" />
                         <QrCode className="h-4 w-4" />
                         QR Code
-                      </Label>
-                      <Label
-                        htmlFor="transport-bank"
-                        className={cn(
-                          "flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-all",
-                          paymentMethod === 'bank_transfer' && "border-primary bg-primary/5"
-                        )}
-                      >
-                        <RadioGroupItem value="bank_transfer" id="transport-bank" />
-                        <Building2 className="h-4 w-4" />
-                        Bank
-                      </Label>
-                      <Label
-                        htmlFor="transport-card"
-                        className={cn(
-                          "flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-all",
-                          paymentMethod === 'card' && "border-primary bg-primary/5"
-                        )}
-                      >
-                        <RadioGroupItem value="card" id="transport-card" />
-                        <CreditCard className="h-4 w-4" />
-                        Card
-                      </Label>
-                      <Label
-                        htmlFor="transport-swiping"
-                        className={cn(
-                          "flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-all",
-                          paymentMethod === 'swiping' && "border-primary bg-primary/5"
-                        )}
-                      >
-                        <RadioGroupItem value="swiping" id="transport-swiping" />
-                        <Smartphone className="h-4 w-4" />
-                        Swiping
                       </Label>
                     </div>
                   </RadioGroup>

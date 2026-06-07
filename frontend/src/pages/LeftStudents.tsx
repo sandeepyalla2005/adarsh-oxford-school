@@ -1289,8 +1289,6 @@ export default function LeftStudents() {
                     <SelectItem value="CASH">Cash</SelectItem>
                     <SelectItem value="UPI">UPI Payment</SelectItem>
                     <SelectItem value="QR_CODE">UPI QR Scanner (Static QR)</SelectItem>
-                    <SelectItem value="BANK_TRANSFER">Bank Transfer</SelectItem>
-                    <SelectItem value="CHEQUE">Cheque</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

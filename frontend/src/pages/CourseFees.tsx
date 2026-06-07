@@ -2,18 +2,14 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-
   Search,
   Phone,
-  CreditCard,
   Banknote,
   QrCode,
-  Building2,
   GraduationCap,
   BookOpen,
   Bus,
-  IndianRupee,
-  Smartphone
+  IndianRupee
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
@@ -849,39 +845,6 @@ export default function CourseFees() {
                         <RadioGroupItem value="qr_code" id="qr_code" />
                         <QrCode className="h-4 w-4" />
                         QR Code
-                      </Label>
-                      <Label
-                        htmlFor="bank_transfer"
-                        className={cn(
-                          "flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-all",
-                          paymentMethod === 'bank_transfer' && "border-primary bg-primary/5"
-                        )}
-                      >
-                        <RadioGroupItem value="bank_transfer" id="bank_transfer" />
-                        <Building2 className="h-4 w-4" />
-                        Bank
-                      </Label>
-                      <Label
-                        htmlFor="card"
-                        className={cn(
-                          "flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-all",
-                          paymentMethod === 'card' && "border-primary bg-primary/5"
-                        )}
-                      >
-                        <RadioGroupItem value="card" id="card" />
-                        <CreditCard className="h-4 w-4" />
-                        Card
-                      </Label>
-                      <Label
-                        htmlFor="swiping"
-                        className={cn(
-                          "flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-all",
-                          paymentMethod === 'swiping' && "border-primary bg-primary/5"
-                        )}
-                      >
-                        <RadioGroupItem value="swiping" id="swiping" />
-                        <Smartphone className="h-4 w-4" />
-                        Swiping
                       </Label>
                     </div>
                   </RadioGroup>
