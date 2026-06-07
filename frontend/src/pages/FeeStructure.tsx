@@ -190,6 +190,19 @@ export default function FeeStructure() {
       };
 
       if (selectedStructure) {
+        const oldYear = selectedStructure.academic_year;
+        const newYear = formData.academic_year;
+
+        if (oldYear !== newYear) {
+          // Update the academic year for all structures that match the old academic year
+          const { error: batchError } = await supabase
+            .from('fee_structure')
+            .update({ academic_year: newYear })
+            .eq('academic_year', oldYear);
+
+          if (batchError) throw batchError;
+        }
+
         const { error } = await supabase
           .from('fee_structure')
           .update(feeData)
@@ -199,7 +212,9 @@ export default function FeeStructure() {
 
         toast({
           title: 'Fee Structure Updated',
-          description: 'Fee structure has been updated successfully.',
+          description: oldYear !== newYear 
+            ? `Fee structure updated successfully and academic year changed from ${oldYear} to ${newYear} for all classes.`
+            : 'Fee structure has been updated successfully.',
         });
       } else {
         const { error } = await supabase
