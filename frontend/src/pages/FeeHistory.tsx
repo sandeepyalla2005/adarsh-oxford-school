@@ -7,8 +7,19 @@ import {
   Download,
   Printer,
   IndianRupee,
-  FileText
+  FileText,
+  RotateCcw
 } from 'lucide-react';
+import { getApiBaseUrl } from '@/lib/api';
+import { toast } from '@/components/ui/sonner';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription
+} from '@/components/ui/dialog';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -72,6 +83,58 @@ export default function FeeHistory() {
 
   const { currentAcademicYear } = useAcademicYear();
   const [selectedAcademicYear, setSelectedAcademicYear] = useState<string>(currentAcademicYear || '');
+
+  // Void Reversal state
+  const [isVoidDialogOpen, setIsVoidDialogOpen] = useState(false);
+  const [selectedPaymentForVoid, setSelectedPaymentForVoid] = useState<Payment | null>(null);
+  const [voidReason, setVoidReason] = useState('');
+  const [isSubmittingVoid, setIsSubmittingVoid] = useState(false);
+
+  const handleRequestVoidClick = (payment: Payment) => {
+    setSelectedPaymentForVoid(payment);
+    setVoidReason('');
+    setIsVoidDialogOpen(true);
+  };
+
+  const handleConfirmRequestVoid = async () => {
+    if (!selectedPaymentForVoid || !voidReason.trim()) {
+      toast.error('Please provide a reason for requesting the payment reversal.');
+      return;
+    }
+    
+    setIsSubmittingVoid(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch(`${getApiBaseUrl()}/api/payments/void/request`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`,
+        },
+        body: JSON.stringify({
+          receipt_number: selectedPaymentForVoid.receipt_number,
+          payment_type: selectedPaymentForVoid.fee_type === 'accessories' ? 'accessory' : selectedPaymentForVoid.fee_type,
+          amount: selectedPaymentForVoid.amount_paid,
+          student_name: selectedPaymentForVoid.student_name,
+          reason: voidReason.trim(),
+        }),
+      });
+      
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || 'Failed to submit void request.');
+      }
+      
+      toast.success(`Your request to undo receipt ${selectedPaymentForVoid.receipt_number} has been submitted for admin approval.`);
+      setIsVoidDialogOpen(false);
+      setSelectedPaymentForVoid(null);
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error.message || 'Unable to submit reversal request.');
+    } finally {
+      setIsSubmittingVoid(false);
+    }
+  };
 
   const getAcademicYearOptions = (currentYearStr: string) => {
     if (!currentYearStr) return [];
@@ -611,13 +674,25 @@ export default function FeeHistory() {
                             {format(new Date(payment.payment_date), 'dd MMM yyyy, hh:mm a')}
                           </TableCell>
                           <TableCell className="text-center print:hidden">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => navigate(`/receipt?receiptNo=${payment.receipt_number}&type=${payment.fee_type}`)}
-                            >
-                              <FileText className="h-4 w-4 text-primary" />
-                            </Button>
+                            <div className="flex items-center justify-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                title="View Receipt"
+                                onClick={() => navigate(`/receipt?receiptNo=${payment.receipt_number}&type=${payment.fee_type}`)}
+                              >
+                                <FileText className="h-4 w-4 text-primary" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                title="Undo Payment / Request Reversal"
+                                className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => handleRequestVoidClick(payment)}
+                              >
+                                <RotateCcw className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))
@@ -628,6 +703,49 @@ export default function FeeHistory() {
             </CardContent>
           </Card>
         </motion.div>
+        {/* Reversal / Void Dialog */}
+        <Dialog open={isVoidDialogOpen} onOpenChange={setIsVoidDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="font-display text-xl flex items-center gap-2 text-red-600">
+                <RotateCcw className="h-5 w-5" />
+                Request Payment Reversal
+              </DialogTitle>
+              <DialogDescription>
+                This will submit a request to the administrator to void this transaction. Once approved, the payment will be reversed and the student's pending fees will be restored.
+              </DialogDescription>
+            </DialogHeader>
+            {selectedPaymentForVoid && (
+              <div className="space-y-4 my-2 text-sm">
+                <div className="bg-slate-50 p-3 rounded-lg border space-y-1">
+                  <div className="flex justify-between"><span className="text-slate-500">Receipt No:</span><span className="font-mono font-semibold">{selectedPaymentForVoid.receipt_number}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Student:</span><span className="font-semibold">{selectedPaymentForVoid.student_name}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Amount:</span><span className="font-semibold text-primary">{formatCurrency(selectedPaymentForVoid.amount_paid)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Type:</span><span className="capitalize font-semibold">{selectedPaymentForVoid.fee_type}</span></div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-700">Reason for Reversal</label>
+                  <textarea
+                    value={voidReason}
+                    onChange={(e) => setVoidReason(e.target.value)}
+                    placeholder="Provide a detailed reason (e.g. Paid incorrect student, wrong fee category, etc.)"
+                    className="w-full min-h-[80px] p-2 border rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                    required
+                  />
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsVoidDialogOpen(false)} disabled={isSubmittingVoid}>
+                Cancel
+              </Button>
+              <Button type="button" className="bg-red-600 hover:bg-red-700 text-white font-bold" onClick={handleConfirmRequestVoid} disabled={isSubmittingVoid || !voidReason.trim()}>
+                {isSubmittingVoid ? 'Submitting...' : 'Submit Request'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <style>{`
           @media print {
             * {

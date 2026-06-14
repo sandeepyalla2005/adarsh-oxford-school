@@ -4220,6 +4220,166 @@ async def verify_qr_payment(payment_id: str, request: QRPaymentVerifyRequest, us
         logger.error(f"Error verifying QR payment: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+class PaymentVoidRequestModel(BaseModel):
+    receipt_number: str
+    payment_type: str
+    amount: float
+    student_name: str
+    reason: str
+
+@app.post("/api/payments/void/request")
+async def create_payment_void_request(request: PaymentVoidRequestModel, user=Depends(get_current_user)):
+    try:
+        admin_client = get_admin_client()
+        res = admin_client.table("payment_void_requests").insert({
+            "receipt_number": request.receipt_number,
+            "payment_type": request.payment_type,
+            "amount": request.amount,
+            "student_name": request.student_name,
+            "reason": request.reason,
+            "requested_by": user.id,
+            "status": "pending"
+        }).execute()
+        return {"status": "success", "data": res.data}
+    except Exception as e:
+        logger.error(f"Error creating void request: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/payments/void/requests")
+async def get_payment_void_requests(status: Optional[str] = None, user=Depends(get_current_user)):
+    try:
+        admin_client = get_admin_client()
+        query = admin_client.table("payment_void_requests").select("*")
+        if status:
+            query = query.eq("status", status)
+        res = query.order("requested_at", ascending=False).execute()
+        
+        data = res.data or []
+        user_ids = list(set([r.get("requested_by") for r in data if r.get("requested_by")] + [r.get("approved_by") for r in data if r.get("approved_by")]))
+        
+        profiles_map = {}
+        if user_ids:
+            prof_res = admin_client.table("profiles").select("user_id, full_name").in_("user_id", user_ids).execute()
+            if prof_res.data:
+                profiles_map = {p["user_id"]: p["full_name"] for p in prof_res.data}
+                
+        for r in data:
+            r["requested_by_name"] = profiles_map.get(r.get("requested_by"), "Unknown User")
+            r["approved_by_name"] = profiles_map.get(r.get("approved_by"), "N/A")
+            
+        return data
+    except Exception as e:
+        logger.error(f"Error fetching void requests: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/payments/void/approve/{request_id}")
+async def approve_payment_void(request_id: str, user=Depends(get_current_user)):
+    if user.role != 'admin':
+        raise HTTPException(status_code=403, detail="Only administrators can approve payment void requests.")
+    try:
+        admin_client = get_admin_client()
+        
+        req_res = admin_client.table("payment_void_requests").select("*").eq("id", request_id).execute()
+        if not req_res.data:
+            raise HTTPException(status_code=404, detail="Payment void request not found.")
+        
+        void_req = req_res.data[0]
+        if void_req["status"] != "pending":
+            raise HTTPException(status_code=400, detail=f"Request is already {void_req['status']}.")
+            
+        receipt_no = void_req["receipt_number"]
+        payment_type = void_req["payment_type"]
+        
+        if payment_type == "course":
+            admin_client.table("course_payments").delete().eq("receipt_number", receipt_no).execute()
+        elif payment_type == "books":
+            admin_client.table("books_payments").delete().eq("receipt_number", receipt_no).execute()
+        elif payment_type == "transport":
+            admin_client.table("transport_payments").delete().eq("receipt_number", receipt_no).execute()
+        elif payment_type == "accessory":
+            sales_res = admin_client.table("accessory_sales").select("accessory_id, quantity").eq("receipt_number", receipt_no).execute()
+            if sales_res.data:
+                for sale in sales_res.data:
+                    acc_id = sale.get("accessory_id")
+                    qty_to_return = int(sale.get("quantity") or 0)
+                    if acc_id and qty_to_return > 0:
+                        acc_res = admin_client.table("accessories").select("quantity").eq("id", acc_id).single().execute()
+                        if acc_res.data:
+                            curr_qty = int(acc_res.data.get("quantity") or 0)
+                            new_qty = curr_qty + qty_to_return
+                            new_status = "in_stock" if new_qty > 5 else ("low_stock" if new_qty > 0 else "out_of_stock")
+                            admin_client.table("accessories").update({
+                                "quantity": new_qty,
+                                "stock_status": new_status
+                            }).eq("id", acc_id).execute()
+                            
+            admin_client.table("accessory_sales").delete().eq("receipt_number", receipt_no).execute()
+            admin_client.table("student_accessory_payments").delete().eq("receipt_number", receipt_no).execute()
+        elif payment_type == "left_student":
+            admin_client.table("left_student_recovery_payments").delete().eq("receipt_number", receipt_no).execute()
+        else:
+            admin_client.table("course_payments").delete().eq("receipt_number", receipt_no).execute()
+            admin_client.table("books_payments").delete().eq("receipt_number", receipt_no).execute()
+            admin_client.table("transport_payments").delete().eq("receipt_number", receipt_no).execute()
+            admin_client.table("student_accessory_payments").delete().eq("receipt_number", receipt_no).execute()
+            admin_client.table("left_student_recovery_payments").delete().eq("receipt_number", receipt_no).execute()
+            
+            sales_res = admin_client.table("accessory_sales").select("accessory_id, quantity").eq("receipt_number", receipt_no).execute()
+            if sales_res.data:
+                for sale in sales_res.data:
+                    acc_id = sale.get("accessory_id")
+                    qty_to_return = int(sale.get("quantity") or 0)
+                    if acc_id and qty_to_return > 0:
+                        acc_res = admin_client.table("accessories").select("quantity").eq("id", acc_id).single().execute()
+                        if acc_res.data:
+                            curr_qty = int(acc_res.data.get("quantity") or 0)
+                            new_qty = curr_qty + qty_to_return
+                            new_status = "in_stock" if new_qty > 5 else ("low_stock" if new_qty > 0 else "out_of_stock")
+                            admin_client.table("accessories").update({
+                                "quantity": new_qty,
+                                "stock_status": new_status
+                            }).eq("id", acc_id).execute()
+                admin_client.table("accessory_sales").delete().eq("receipt_number", receipt_no).execute()
+
+        admin_client.table("payment_void_requests").update({
+            "status": "approved",
+            "approved_by": user.id,
+            "approved_at": datetime.now(timezone.utc).isoformat()
+        }).eq("id", request_id).execute()
+        
+        clear_all_caches()
+        return {"status": "success", "message": f"Payment receipt {receipt_no} has been voided successfully."}
+    except Exception as e:
+        logger.error(f"Error approving void request: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/payments/void/reject/{request_id}")
+async def reject_payment_void(request_id: str, user=Depends(get_current_user)):
+    if user.role != 'admin':
+        raise HTTPException(status_code=403, detail="Only administrators can reject payment void requests.")
+    try:
+        admin_client = get_admin_client()
+        
+        req_res = admin_client.table("payment_void_requests").select("*").eq("id", request_id).execute()
+        if not req_res.data:
+            raise HTTPException(status_code=404, detail="Payment void request not found.")
+        
+        void_req = req_res.data[0]
+        if void_req["status"] != "pending":
+            raise HTTPException(status_code=400, detail=f"Request is already {void_req['status']}.")
+            
+        admin_client.table("payment_void_requests").update({
+            "status": "rejected",
+            "approved_by": user.id,
+            "approved_at": datetime.now(timezone.utc).isoformat()
+        }).eq("id", request_id).execute()
+        
+        return {"status": "success", "message": "Payment void request rejected."}
+    except Exception as e:
+        logger.error(f"Error rejecting void request: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+

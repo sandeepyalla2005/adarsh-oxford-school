@@ -98,7 +98,85 @@ export default function AdminApprovals() {
     
     const [isLoading, setIsLoading] = useState(true);
     const [processingId, setProcessingId] = useState<string | number | null>(null);
-    const [activeTab, setActiveTab] = useState<'pending' | 'registry' | 'insights'>('pending');
+    const [activeTab, setActiveTab] = useState<'pending' | 'registry' | 'insights' | 'voids'>('pending');
+
+    // Reversal requests states
+    const [voidRequests, setVoidRequests] = useState<any[]>([]);
+    const [isVoidRequestsLoading, setIsVoidRequestsLoading] = useState(false);
+
+    const fetchVoidRequests = async () => {
+        setIsVoidRequestsLoading(true);
+        try {
+            const resp = await apiFetch('/api/payments/void/requests?status=pending', {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+            });
+            if (!resp.ok) throw new Error('Failed to load void requests');
+            const data = await resp.json();
+            setVoidRequests(data);
+        } catch (e: any) {
+            console.error('Error fetching void requests:', e);
+            toast({
+                variant: 'destructive',
+                title: 'Error',
+                description: e.message || 'Failed to load void requests.',
+            });
+        } finally {
+            setIsVoidRequestsLoading(false);
+        }
+    };
+
+    const handleApproveVoid = async (requestId: string, receiptNo: string) => {
+        setProcessingId(requestId);
+        try {
+            const resp = await apiFetch(`/api/payments/void/approve/${requestId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || 'Approval failed');
+            toast({
+                title: 'Payment Voided',
+                description: `Receipt ${receiptNo} has been successfully voided.`,
+            });
+            fetchVoidRequests();
+        } catch (e: any) {
+            console.error(e);
+            toast({
+                variant: 'destructive',
+                title: 'Error',
+                description: e.message || 'Failed to approve reversal.',
+            });
+        } finally {
+            setProcessingId(null);
+        }
+    };
+
+    const handleRejectVoid = async (requestId: string) => {
+        setProcessingId(requestId);
+        try {
+            const resp = await apiFetch(`/api/payments/void/reject/${requestId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || 'Rejection failed');
+            toast({
+                title: 'Void Request Rejected',
+                description: 'The void request was rejected.',
+            });
+            fetchVoidRequests();
+        } catch (e: any) {
+            console.error(e);
+            toast({
+                variant: 'destructive',
+                title: 'Error',
+                description: e.message || 'Failed to reject void request.',
+            });
+        } finally {
+            setProcessingId(null);
+        }
+    };
     
     // Search and filters for registry
     const [searchQuery, setSearchQuery] = useState('');
@@ -150,6 +228,7 @@ export default function AdminApprovals() {
 
     useEffect(() => {
         fetchAllData();
+        fetchVoidRequests();
     }, []);
 
     const handleApprove = async (student: Student) => {
@@ -402,7 +481,7 @@ export default function AdminApprovals() {
                 </div>
 
                 {/* Custom Glassmorphic Navigation Tabs */}
-                <div className="flex bg-[#F1F5F9] p-1.5 rounded-2xl max-w-lg border border-slate-200/50 shadow-inner">
+                <div className="flex bg-[#F1F5F9] p-1.5 rounded-2xl max-w-2xl border border-slate-200/50 shadow-inner">
                     <button
                         onClick={() => setActiveTab('pending')}
                         className={`flex-1 py-3 px-4 rounded-xl text-sm font-extrabold tracking-wide transition-all duration-300 flex items-center justify-center gap-2 ${
@@ -427,6 +506,21 @@ export default function AdminApprovals() {
                         }`}
                     >
                         Dropout Registry
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('voids')}
+                        className={`flex-1 py-3 px-4 rounded-xl text-sm font-extrabold tracking-wide transition-all duration-300 flex items-center justify-center gap-2 ${
+                            activeTab === 'voids'
+                                ? 'bg-white text-[#002147] shadow-md border border-slate-100'
+                                : 'text-slate-500 hover:text-slate-800'
+                        }`}
+                    >
+                        Reversals
+                        {voidRequests.length > 0 && (
+                            <Badge className="bg-red-500 hover:bg-red-600 text-white font-bold h-5 w-5 flex items-center justify-center p-0 rounded-full text-[10px]">
+                                {voidRequests.length}
+                            </Badge>
+                        )}
                     </button>
                     <button
                         onClick={() => setActiveTab('insights')}
@@ -840,7 +934,136 @@ export default function AdminApprovals() {
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+                        )}
 
+                        {/* Tab 4: Payment Reversals */}
+                        {activeTab === 'voids' && (
+                            <div className="space-y-6">
+                                {isVoidRequestsLoading ? (
+                                    <div className="flex flex-col items-center justify-center h-80 bg-white rounded-[2rem] border border-slate-100 shadow-md">
+                                        <Loader2 className="h-10 w-10 animate-spin text-blue-600 mb-3" />
+                                        <p className="text-slate-400 font-bold text-sm">Loading reversal requests...</p>
+                                    </div>
+                                ) : voidRequests.length === 0 ? (
+                                    <motion.div
+                                        initial={{ opacity: 0, scale: 0.95 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        className="flex flex-col items-center justify-center bg-white rounded-[2.5rem] border border-slate-200/50 p-16 text-center shadow-lg"
+                                    >
+                                        <div className="h-20 w-20 bg-emerald-50 rounded-full flex items-center justify-center mb-6 ring-8 ring-emerald-50/50">
+                                            <CheckCircle className="h-10 w-10 text-emerald-500" />
+                                        </div>
+                                        <h3 className="text-2xl font-black text-[#002147] tracking-tight mb-1.5">All Caught Up!</h3>
+                                        <p className="text-slate-500 max-w-sm text-sm">
+                                            There are no pending payment reversal requests requiring administrative approval.
+                                        </p>
+                                    </motion.div>
+                                ) : (
+                                    <div className="grid gap-6">
+                                        {voidRequests.map((req, index) => (
+                                            <motion.div
+                                                initial={{ opacity: 0, y: 20 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                transition={{ delay: index * 0.05 }}
+                                                key={req.id}
+                                            >
+                                                <Card className="border-none shadow-md overflow-hidden ring-1 ring-slate-100 hover:shadow-lg transition-all relative">
+                                                    <div className="absolute top-0 left-0 w-2 h-full bg-red-500" />
+                                                    <CardContent className="p-0">
+                                                        <div className="flex flex-col lg:flex-row items-stretch">
+                                                            
+                                                            {/* Left side details */}
+                                                            <div className="p-6 md:p-8 flex-1 border-b lg:border-b-0 lg:border-r border-slate-100 bg-white space-y-6">
+                                                                <div className="flex items-start justify-between flex-wrap gap-4">
+                                                                    <div>
+                                                                        <h3 className="text-2xl font-black text-[#002147] tracking-tight">{req.student_name}</h3>
+                                                                        <p className="text-sm font-bold text-slate-500 flex items-center gap-2 mt-1">
+                                                                            <FileText className="h-4 w-4" />
+                                                                            Receipt No: <span className="font-mono text-slate-800 font-semibold">{req.receipt_number}</span>
+                                                                        </p>
+                                                                    </div>
+                                                                    <Badge className="bg-red-100 text-red-800 border-none font-bold uppercase tracking-wider text-[10px] px-3 py-1">
+                                                                        Reversal Request
+                                                                    </Badge>
+                                                                </div>
+
+                                                                {/* Grid stats */}
+                                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                                                    <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 space-y-3">
+                                                                        <h4 className="text-[10px] font-black uppercase tracking-widest text-[#002147] border-b border-slate-200 pb-1.5 mb-2">Transaction Details</h4>
+                                                                        <div>
+                                                                            <span className="text-[10px] uppercase font-bold text-slate-400">Payment Type</span>
+                                                                            <p className="text-xs font-bold text-slate-700 capitalize">{req.payment_type}</p>
+                                                                        </div>
+                                                                        <div>
+                                                                            <span className="text-[10px] uppercase font-bold text-slate-400">Amount Paid</span>
+                                                                            <p className="text-sm font-black text-red-600">₹{req.amount}</p>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 space-y-3">
+                                                                        <h4 className="text-[10px] font-black uppercase tracking-widest text-[#002147] border-b border-slate-200 pb-1.5 mb-2">Request Info</h4>
+                                                                        <div>
+                                                                            <span className="text-[10px] uppercase font-bold text-slate-400">Requested By</span>
+                                                                            <p className="text-xs font-bold text-slate-700">{req.requested_by_name || 'Unknown User'}</p>
+                                                                        </div>
+                                                                        <div>
+                                                                            <span className="text-[10px] uppercase font-bold text-slate-400">Requested At</span>
+                                                                            <p className="text-xs font-bold text-slate-700">
+                                                                                {req.requested_at ? new Date(req.requested_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A'}
+                                                                            </p>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Right side reason and actions */}
+                                                            <div className="p-6 md:p-8 lg:w-96 bg-red-50/10 flex flex-col justify-between border-t lg:border-t-0 border-slate-100">
+                                                                <div>
+                                                                    <h4 className="text-xs font-black uppercase tracking-widest text-red-600 mb-2 flex items-center gap-2">
+                                                                        <AlertCircle className="h-4 w-4" />
+                                                                        Reason for Reversal
+                                                                    </h4>
+                                                                    <p className="text-sm font-bold text-slate-700 leading-relaxed bg-white/60 p-4 rounded-xl border border-red-100 shadow-sm min-h-24">
+                                                                        {req.reason || "No reason specified."}
+                                                                    </p>
+                                                                </div>
+
+                                                                <div className="flex gap-3 mt-8">
+                                                                    <Button 
+                                                                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md rounded-xl h-11 border-none transition-all"
+                                                                        onClick={() => handleApproveVoid(req.id, req.receipt_number)}
+                                                                        disabled={processingId !== null}
+                                                                    >
+                                                                        {processingId === req.id ? (
+                                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                                        ) : (
+                                                                            <>
+                                                                                <CheckCircle className="h-4 w-4 mr-2" />
+                                                                                Approve
+                                                                            </>
+                                                                        )}
+                                                                    </Button>
+                                                                    <Button 
+                                                                        variant="outline"
+                                                                        className="flex-1 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 font-bold shadow-sm rounded-xl h-11 transition-all"
+                                                                        onClick={() => handleRejectVoid(req.id)}
+                                                                        disabled={processingId !== null}
+                                                                    >
+                                                                        <XCircle className="h-4 w-4 mr-2" />
+                                                                        Reject
+                                                                    </Button>
+                                                                </div>
+                                                            </div>
+
+                                                        </div>
+                                                    </CardContent>
+                                                </Card>
+                                            </motion.div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
 
