@@ -121,6 +121,7 @@ export default function Dashboard() {
   const [isNoticesLoading, setIsNoticesLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingWipes, setPendingWipes] = useState<{ user_id: string; user_name: string; otp: string }[]>([]);
+  const [pendingVoidsCount, setPendingVoidsCount] = useState<number>(0);
 
   useEffect(() => {
     const fetchDashboardStats = async () => {
@@ -239,8 +240,24 @@ export default function Dashboard() {
       }
     };
 
+    const fetchPendingVoids = async () => {
+      try {
+        const resp = await apiFetch('/api/payments/void/requests?status=pending');
+        if (resp.ok) {
+          const data = await resp.json();
+          setPendingVoidsCount(data.length || 0);
+        }
+      } catch (err) {
+        console.error('Failed to fetch pending void requests:', err);
+      }
+    };
+
     fetchPendingWipes();
-    const interval = setInterval(fetchPendingWipes, 5000); // Poll every 5s
+    fetchPendingVoids();
+    const interval = setInterval(() => {
+      fetchPendingWipes();
+      fetchPendingVoids();
+    }, 10000); // Poll every 10s
     return () => clearInterval(interval);
   }, [userRole]);
 
@@ -373,6 +390,34 @@ export default function Dashboard() {
                 Dismiss
               </Button>
             </div>
+          </motion.div>
+        )}
+
+        {/* Pending Reversal Requests Alert */}
+        {pendingVoidsCount > 0 && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="mb-8 p-6 rounded-[2rem] bg-gradient-to-r from-amber-50 to-white border-2 border-amber-100 shadow-xl shadow-amber-500/5 flex flex-col md:flex-row items-center justify-between gap-6"
+          >
+            <div className="flex items-center gap-5">
+              <div className="h-16 w-16 rounded-[1.25rem] bg-amber-100 flex items-center justify-center shadow-inner">
+                <AlertCircle className="h-10 w-10 text-amber-600 animate-pulse" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-xl font-black text-amber-800 font-display">Pending Reversal Approvals</h3>
+                <p className="text-slate-600 text-sm font-bold">
+                  There are {pendingVoidsCount} payment reversal request(s) waiting for your review.
+                </p>
+              </div>
+            </div>
+            
+            <Button 
+              className="bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-lg shadow-amber-500/20 px-6 h-12"
+              onClick={() => navigate(portalPath(portal, '/approvals'))}
+            >
+              Go to Approvals
+            </Button>
           </motion.div>
         )}
 
