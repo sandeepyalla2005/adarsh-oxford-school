@@ -62,7 +62,7 @@ const adminNavigation = [
   { name: 'Financial Reports', path: '/financial-reports', icon: BarChart3, roles: ['admin'] },
   { name: 'Audit Logs', path: '/audit', icon: History, roles: ['admin'] },
   { name: 'Notices', path: '/notices', icon: MessageSquare, roles: ['admin'] },
-  { name: 'Admin Approvals', path: '/approvals', icon: AlertCircle, roles: ['admin'] },
+  { name: 'Dropouts Dashboard', path: '/approvals', icon: AlertCircle, roles: ['admin'] },
   { name: 'Student Exit Register', path: '/left-students', icon: UserMinus, roles: ['admin'] },
   { name: 'SMS', path: '/sms', icon: MessageSquare, roles: ['admin'] },
   { name: 'Attendance', path: '/attendance', icon: UserCheck, roles: ['admin'] },

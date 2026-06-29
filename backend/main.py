@@ -1166,7 +1166,7 @@ def refresh_dashboard_stats_task():
             logger.error(f"Error fetching transport_payments: {e}")
 
         try:
-            res = client.table("student_accessory_payments").select("amount_paid, payment_date, payment_method").eq("academic_year", current_year).execute()
+            res = client.table("student_accessory_payments").select("amount_paid, payment_date, payment_method, created_at").eq("academic_year", current_year).execute()
             student_accessory_payments = res.data or []
         except Exception as e:
             logger.error(f"Error fetching student_accessory_payments: {e}")
@@ -1233,7 +1233,8 @@ def refresh_dashboard_stats_task():
 
         # Student accessory payments
         for p in student_accessory_payments:
-            dt = parse_dt(p.get("payment_date"))
+            # Fall back to created_at if payment_date is not set (legacy records)
+            dt = parse_dt(p.get("payment_date")) or parse_dt(p.get("created_at"))
             if dt:
                 processed_payments.append({
                     "category": "accessory",
@@ -1339,6 +1340,16 @@ def refresh_dashboard_stats_task():
         col_books = sum_cat_since("books", None)
         col_transport = sum_cat_since("transport", None)
 
+        # Compute pending accessories across all active students
+        pending_accessories_total = 0.0
+        try:
+            acc_fees_res = client.table("student_accessory_fees").select("fee_amount").eq("academic_year", current_year).execute()
+            total_acc_fee = sum(float(f.get("fee_amount") or 0.0) for f in (acc_fees_res.data or []))
+            total_acc_paid = sum_cat_since("accessory", None)
+            pending_accessories_total = max(0.0, total_acc_fee - total_acc_paid)
+        except Exception as e:
+            logger.error(f"Error computing pendingAccessories in stats: {e}")
+
         # Monthly chart data (last 6 calendar months)
         monthly_chart_data = []
         for i in range(5, -1, -1):
@@ -1366,10 +1377,11 @@ def refresh_dashboard_stats_task():
             "todayIncome":    today_income,
             "weeklyIncome":   weekly_income,
             "monthlyIncome":  monthly_income,
-            "pendingCourse":    max(course_expected    - col_course,    0),
-            "pendingBooks":     max(books_expected     - col_books,     0),
-            "pendingTransport": max(transport_expected - col_transport, 0),
-            "pendingFees":      max(all_expected     - col_course - col_books - col_transport, 0),
+            "pendingCourse":       max(course_expected    - col_course,    0),
+            "pendingBooks":        max(books_expected     - col_books,     0),
+            "pendingTransport":    max(transport_expected - col_transport, 0),
+            "pendingAccessories":  pending_accessories_total,
+            "pendingFees":         max(all_expected     - col_course - col_books - col_transport, 0),
             "todayCourse":     today_course,
             "todayBooks":      today_books,
             "todayTransport":  today_trans,
@@ -1447,6 +1459,7 @@ def get_dashboard_stats(background_tasks: BackgroundTasks, user=Depends(get_curr
             "pendingCourse": 0.0,
             "pendingBooks": 0.0,
             "pendingTransport": 0.0,
+            "pendingAccessories": 0.0,
             "pendingFees": 0.0,
             "todayCourse": 0.0, "todayBooks": 0.0, "todayTransport": 0.0, "todayAccessories": 0.0,
             "weeklyCourse": 0.0, "weeklyBooks": 0.0, "weeklyTransport": 0.0, "weeklyAccessories": 0.0,
@@ -3018,7 +3031,8 @@ async def create_accessory_payment(payment: AccessoryPayment, user=Depends(get_c
             "academic_year": get_current_academic_year(),
             "amount_paid": payment.amount_paid,
             "payment_method": payment.payment_method,
-            "receipt_number": receipt_number
+            "receipt_number": receipt_number,
+            "payment_date": datetime.now(timezone.utc).isoformat()
         }
         
         response = supabase.table("student_accessory_payments").insert(payment_data).execute()
@@ -4252,7 +4266,7 @@ async def get_payment_void_requests(status: Optional[str] = None, user=Depends(g
         query = admin_client.table("payment_void_requests").select("*")
         if status:
             query = query.eq("status", status)
-        res = query.order("requested_at", desc=True).execute()
+        res = query.order("requested_at", ascending=False).execute()
         
         data = res.data or []
         user_ids = list(set([r.get("requested_by") for r in data if r.get("requested_by")] + [r.get("approved_by") for r in data if r.get("approved_by")]))

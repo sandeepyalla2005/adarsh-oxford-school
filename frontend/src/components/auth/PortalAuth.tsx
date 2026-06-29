@@ -262,7 +262,7 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
 
   return (
     <div className="h-screen w-screen bg-slate-50 text-slate-900 overflow-hidden font-sans">
-      <div className="grid h-full w-full lg:grid-cols-2 xl:grid-cols-[1.15fr_0.85fr] grid-rows-[auto_1fr] lg:grid-rows-1">
+      <div className="grid h-full w-full lg:grid-cols-[1.2fr_0.8fr] grid-rows-[auto_1fr] lg:grid-rows-1">
         {/* Left Side: Image Section */}
         <aside className="relative h-[30vh] lg:h-full w-full overflow-hidden group">
           <img
@@ -271,7 +271,7 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
             className="h-full w-full object-cover transition-transform duration-[20s] ease-linear group-hover:scale-110 brightness-[0.85] contrast-[1.05] saturate-[1.1]"
           />
           <div className="absolute inset-0 bg-gradient-to-t lg:bg-gradient-to-r from-black/80 via-black/40 to-transparent" />
-          <div className="absolute inset-x-0 bottom-0 p-6 lg:p-10 xl:p-16 text-white bg-gradient-to-t from-black/80 via-black/20 to-transparent">
+          <div className="absolute inset-x-0 bottom-0 p-6 lg:p-16 text-white bg-gradient-to-t from-black/80 via-black/20 to-transparent">
             <motion.div
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
@@ -280,7 +280,7 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
               <p className="text-[12px] lg:text-[14px] font-bold uppercase tracking-[0.5em] text-white/80 mb-2">
                 {meta.tagline}
               </p>
-              <h2 className="text-3xl lg:text-5xl font-black leading-none tracking-tighter mb-4">
+              <h2 className="text-3xl lg:text-6xl font-black leading-none tracking-tighter mb-4">
                 {meta.title}
               </h2>
               <p className="max-w-xl text-sm lg:text-base leading-relaxed text-white/70 hidden sm:block font-medium">
@@ -291,38 +291,38 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
         </aside>
 
         {/* Right Side: Login Form Section */}
-        <main className="relative flex flex-col h-full overflow-y-auto items-center justify-center bg-slate-50 px-4 py-6 sm:px-8 lg:px-6 xl:px-12">
+        <main className="relative flex flex-col h-full overflow-y-auto lg:overflow-hidden items-center justify-center bg-slate-50 px-4 py-6 sm:px-8 lg:px-12">
           {/* Subtle background decoration for premium feel */}
           <div className="absolute top-0 right-0 w-64 h-64 bg-blue-50/50 rounded-full blur-3xl -mr-32 -mt-32" />
           <div className="absolute bottom-0 left-0 w-64 h-64 bg-red-50/50 rounded-full blur-3xl -ml-32 -mb-32" />
 
-          <section className="relative w-full max-w-[450px] lg:my-auto z-10">
-            <div className="rounded-[2rem] border border-white/40 bg-white/80 backdrop-blur-xl p-6 sm:p-8 lg:p-8 xl:p-10 shadow-[0_8px_30px_rgb(0,0,0,0.04),0_20px_50px_rgba(0,0,0,0.03)] ring-1 ring-black/[0.02]">
-              <div className="mb-6 border-b border-slate-100 pb-6">
-                <div className="flex flex-col items-center mb-6 pt-2">
+          <section className="relative w-full max-w-[500px] lg:my-auto z-10">
+            <div className="rounded-[2.5rem] border border-white/40 bg-white/80 backdrop-blur-xl lg:p-10 shadow-[0_8px_30px_rgb(0,0,0,0.04),0_20px_50px_rgba(0,0,0,0.03)] ring-1 ring-black/[0.02]">
+              <div className="mb-8 border-b border-slate-100 pb-8">
+                <div className="flex flex-col items-center mb-10 pt-4">
                   {/* Motto at the top, centered */}
-                  <span className="text-[10px] lg:text-[11px] font-bold uppercase tracking-[0.4em] text-blue-600/60 mb-4 text-center w-full">
+                  <span className="text-[10px] lg:text-[12px] font-bold uppercase tracking-[0.4em] text-blue-600/60 mb-6 text-center w-full">
                     A Way and a Vision
                   </span>
 
                   {/* Branding Container: Crest + Name side-by-side */}
-                  <div className="flex items-center justify-center gap-4 sm:gap-6">
+                  <div className="flex items-center justify-center gap-6 lg:gap-10">
                     {/* Official Crest */}
                     <div className="shrink-0">
                       <img 
                         src="/school-logo-official.png" 
                         alt="Logo" 
-                        className="h-14 w-14 lg:h-20 lg:w-20 object-contain drop-shadow-lg"
+                        className="h-16 w-16 lg:h-24 lg:w-24 object-contain drop-shadow-lg"
                       />
                     </div>
 
                     {/* School Name Branding (Right of Crest) */}
                     <div className="flex flex-col justify-center leading-none">
                       <h1 className="flex flex-col gap-1">
-                        <span className="text-2xl sm:text-3xl lg:text-3xl xl:text-4xl font-black tracking-tighter text-slate-950">
+                        <span className="text-3xl lg:text-5xl font-black tracking-tighter text-slate-950">
                           Oxford
                         </span>
-                        <span className="text-2xl sm:text-3xl lg:text-3xl xl:text-4xl font-medium tracking-tight text-red-600">
+                        <span className="text-3xl lg:text-5xl font-medium tracking-tight text-red-600">
                           School
                         </span>
                       </h1>
@@ -341,7 +341,7 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
                     placeholder="Enter Email / Username"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    className="h-12 rounded-xl border-slate-200 bg-slate-50/50 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all text-base"
+                    className="h-14 rounded-xl border-slate-200 bg-slate-50/50 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all text-base"
                     required
                   />
                 </div>
@@ -358,7 +358,7 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
                     placeholder="Enter Password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="h-12 rounded-xl border-slate-200 bg-slate-50/50 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all text-base"
+                    className="h-14 rounded-xl border-slate-200 bg-slate-50/50 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all text-base"
                     required
                   />
                   <div className="flex items-center gap-2 pt-2">
@@ -401,24 +401,24 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-3 pt-4">
+                <div className="flex flex-col sm:flex-row gap-4 pt-6">
                   <Button 
                     type="submit" 
                     disabled={isSubmitting} 
-                    className="h-12 bg-[#20b2aa] hover:bg-[#1a948e] hover:-translate-y-0.5 text-white font-bold text-sm rounded-xl shadow-[0_6px_15px_-3px_rgba(32,178,170,0.3)] transition-all active:scale-[0.98]"
+                    className="h-14 flex-1 bg-[#20b2aa] hover:bg-[#1a948e] hover:-translate-y-1 text-white font-black text-base lg:text-lg rounded-xl shadow-[0_10px_20px_-5px_rgba(32,178,170,0.3)] transition-all active:scale-[0.98]"
                   >
-                    {isSubmitting ? '...' : 'LOGIN'}
+                    {isSubmitting ? 'Authenticating...' : 'LOGIN'}
                   </Button>
                   <Button 
                     type="button" 
                     onClick={() => setShowForgotModal(true)}
-                    className="h-12 bg-[#ff4d4d] hover:bg-[#e64545] hover:-translate-y-0.5 text-white font-bold text-sm rounded-xl shadow-[0_6px_15px_-3px_rgba(255,77,77,0.3)] transition-all active:scale-[0.98]"
+                    className="h-14 flex-1 bg-[#ff4d4d] hover:bg-[#e64545] hover:-translate-y-1 text-white font-black text-base lg:text-lg rounded-xl shadow-[0_10px_20px_-5px_rgba(255,77,77,0.3)] transition-all active:scale-[0.98]"
                   >
                     FORGOT PASSWORD
                   </Button>
                 </div>
 
-                <div className="flex flex-col items-center gap-4 pt-4">
+                <div className="flex flex-col items-center gap-4 pt-6">
                   <div className="flex items-center w-full gap-4">
                     <div className="h-px flex-1 bg-slate-100" />
                     <span className="text-[10px] font-bold text-slate-300 uppercase tracking-[0.3em]">OR</span>
@@ -428,7 +428,7 @@ export default function PortalAuth({ allowedRoles, portalType }: AuthProps) {
                     type="button" 
                     variant="outline" 
                     onClick={handleGoogleSignIn}
-                    className="w-full h-12 border-slate-200 rounded-xl hover:bg-slate-50 transition-all hover:shadow-md"
+                    className="w-full h-14 border-slate-200 rounded-xl hover:bg-slate-50 transition-all hover:shadow-md"
                   >
                     <img 
                       src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" 
