@@ -4266,7 +4266,7 @@ async def get_payment_void_requests(status: Optional[str] = None, user=Depends(g
         query = admin_client.table("payment_void_requests").select("*")
         if status:
             query = query.eq("status", status)
-        res = query.order("requested_at", ascending=False).execute()
+        res = query.order("requested_at", desc=True).execute()
         
         data = res.data or []
         user_ids = list(set([r.get("requested_by") for r in data if r.get("requested_by")] + [r.get("approved_by") for r in data if r.get("approved_by")]))
